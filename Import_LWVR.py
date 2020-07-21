@@ -1,3 +1,24 @@
+"""
+Import_LWVR
+by Joseph Arnson
+on Tuesday, July 21, 2020 at 02:52
+
+The script takes the Load Weight Variance report and
+parses it down to just the Shipments that need to
+be actioned on. Then it removes the remaining excess
+columns, formats and calculates variables, then writes
+the data frame into a dictionary that will be used 
+later for default Unplanned Demand assignment.
+
+Run Time 1:     0:00:19.556800
+Run Time 2:     0:00:19.721495
+Run Time 3:     0:00:18.895732
+Run Time 4:     0:00:18.976302
+Run Time 5:     0:00:19.624358
+
+Avg Time:       0:00:19.354937
+"""
+
 # import packages
 import os
 import datetime
@@ -6,7 +27,6 @@ import pandas as pd
 # import functions
 from openpyxl.reader.excel import load_workbook
 from openpyxl.workbook import Workbook
-
 
 # print message after packages imported successfully
 print("Import of packages successful")
@@ -117,7 +137,6 @@ wb2.save('LWVR.xlsx')
 read_file = pd.read_excel(r'LWVR.xlsx')
 read_file.to_csv(r"LWVR.csv", index=None, header=True)
 os.remove('LWVR.xlsx')
-print(f"Files converted and removed")
 
 # read source csv file
 df = pd.read_csv('LWVR.csv')
