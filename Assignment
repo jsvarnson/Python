@@ -173,7 +173,6 @@ def import_lwvr(lwvr_file: str) -> dict:
     # convert xlsx to csv and remove xlsx
     read_file = pd.read_excel(r'lwvr.xlsx')
     read_file.to_csv(r"lwvr.csv", index=None, header=True)
-    # os.remove('lwvr.xlsx')
     # read source csv file
     df = pd.read_csv('lwvr.csv')
     # remove rows where Include == 0
@@ -248,6 +247,9 @@ def import_lwvr(lwvr_file: str) -> dict:
              'Destination', 'State', 'Pallets', 'Gross_Wt', 'To_Fill', 'Prefill_%']]
     # convert data frame to dictionary
     loads = df.set_index('Delivery').T.to_dict('list')
+    # remove extra files
+    os.remove('lwvr.xlsx')
+    os.remove('lwvr.csv')
     # print execution time
     end_time = datetime.datetime.now()
     lwvr_time = end_time - begin_time
@@ -314,6 +316,8 @@ def import_updr(updr_file: str) -> dict:
     for demand, order in orders.items():
         order[12] = floor(order[12])
 
+    # remove extra files
+    os.remove('UPDR.csv')
     # print execution time
     end_time = datetime.datetime.now()
     updr_time = end_time - begin_time
