@@ -434,7 +434,7 @@ worksheet.write(3, 14, 'Full Truck Equivalent')                     # cell O4
 worksheet.write(4, 14, 'Execution Time')                            # cell O5
 worksheet.write(1, 15, '=SUM($L:$L)', comma_format)                 # cell P2
 worksheet.write(2, 15, '=SUM($K:$K)', comma_format)                 # cell P3
-worksheet.write(3, 15, '=$P$3/45000', comma_format)                 # cell P4
+worksheet.write(3, 15, '=$P$3/43000', comma_format)                 # cell P4
 worksheet.set_column(0, 0, 45)
 worksheet.set_column(1, 1, 13)
 worksheet.set_column(2, 7, 12)
