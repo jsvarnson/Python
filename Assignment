@@ -1,0 +1,530 @@
+# import packages
+import os
+import datetime
+import pandas as pd
+from openpyxl.reader.excel import load_workbook
+from openpyxl.workbook import Workbook
+from itertools import islice
+import xlsxwriter
+from math import floor
+from tkinter import Tk
+from tkinter.filedialog import askopenfilename
+"""
+Loads Dictionary Index
+----------------------
+'Delivery',     key
+'Source_ID',    0
+'Plan_Date',    1
+'Origin',       2
+'Trans_Mode',   3 
+'Destination',  4
+'State',        5
+'Pallets',      6 
+'Gross_Wt',     7
+'To_Fill',      8
+'Prefill_%',    9
+-----------------------
+"""
+"""
+Orders Dictionary Index
+-----------------------
+'Order_ID',     Key
+'Source_ID',    0
+'Plan_WK',      1
+'Origin',       2
+'Trans_Mode',   3
+'Destination',  4
+'State',        5
+'Base_UoM',     6
+'MSKU',         7
+'SO',           8
+'SO_Line',      9
+'Unit_Wt',      10
+'U_Pallet',     11
+'Pallets',      12
+-----------------------
+"""
+# start timer
+s_s_time = datetime.datetime.now()
+print(f"Starting script timer...")
+print(f"Start time: {s_s_time}")
+# set working directory
+filepath = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\Light Loads Template\\LL Python'
+os.chdir(filepath)
+print(f"Directory set to {os.getcwd()}")
+print(f"Defining script functions...")
+
+"""Define script functions"""
+
+
+def assign(target: int, p_wt: float, t_plt: float) -> list:
+    """Calculates how many pallets of unplanned demand can be assigned to the delivery"""
+    try:
+        p_assigned = floor(target / p_wt)
+    except ZeroDivisionError:
+        p_assigned = 0
+    if p_wt > target or p_assigned == 0:
+        n_target = target
+        return [0, 0, n_target]
+    elif p_assigned > t_plt:
+        filled = (t_plt * p_wt)
+        n_target = target - filled
+        return [t_plt, filled, n_target]
+    else:
+        filled = (p_assigned * p_wt)
+        n_target = target - filled
+        t_plt = p_assigned
+        return [t_plt, filled, n_target]
+
+
+def take(n, iterable):
+    """Return first n items of the iterable as a list"""
+    return list(islice(iterable, n))
+
+
+def import_lwvr(lwvr_file: str) -> dict:
+    """Get source data and create loads Dictionary"""
+    # start timer
+    begin_time = datetime.datetime.now()
+    print(f"Start time: {begin_time}")
+    print(f"Importing data to dictionary")
+    # establish variables
+    dunnage = 2000
+    delength = 9
+    # open source report
+    wb1 = load_workbook(lwvr_file)
+    ws1 = wb1["All"]
+    # create destination workbook
+    wb2 = Workbook()
+    ws2 = wb2.active
+    ws2.title = "Sheet1"
+    # calculate total number of rows and
+    # columns in source excel file
+    mr = ws1.max_row
+    mc = ws1.max_column
+    # copying the cell values from source
+    # excel file to destination excel file
+    for i in range(1, mr + 1):
+        for j in range(1, mc + 1):
+            # reading cell value from source excel file
+            c = ws1.cell(row=i, column=j)
+            # writing the read value to destination excel file
+            cell = ws2.cell(row=i, column=j)
+            cell.value = c.value
+
+    # format columns 1 and 2 as numbers
+    for i in range(2, mr + 1):
+        for j in range(1, 3):
+            # ignore blank values
+            try:
+                c = ws2.cell(row=i, column=j)
+                value = int(c.value)
+                c.value = value
+            except TypeError as e:
+                continue
+
+    # delete unwanted columns
+    ws2 = wb2['Sheet1']
+    ws2.delete_cols(7, 1)
+    ws2.delete_cols(8, 3)
+    ws2.delete_cols(10, 1)
+    ws2.delete_cols(14, 1)
+    # insert calculated fields
+    ws2['S1'] = "To Fill"
+    ws2['T1'] = "Include"
+    # get new max rows and columns
+    mr = ws2.max_row
+    # calculate To Fill values
+    for i in range(2, mr + 1):
+        # ignore blank values
+        try:
+            c1 = ws2.cell(row=i, column=17)  # Total Weight
+            c2 = ws2.cell(row=i, column=14)  # Resource Max Weight
+            d = ws2.cell(row=i, column=19)  # To Fill
+            # To Fill = Resource Max Weight - dunnage - Total Weight
+            d.value = c2.value - dunnage - c1.value
+        except TypeError as e:
+            d = ws2.cell(row=i, column=19)  # To Fill
+            d.value = -1
+            continue
+
+    """
+    Conditions to NOT include Delivery
+    1. Length Delivery < 9 (DeLength)
+    2. Max Resource Weight Status = Tentative
+    3. Multiple Deliveries on Shipment = X
+    4. Distributed to EWM = X
+    """
+    for i in range(2, mr + 1):
+        c1 = ws2.cell(row=i, column=2)  # Delivery
+        c2 = ws2.cell(row=i, column=15)  # Resource Max Weight Status
+        c3 = ws2.cell(row=i, column=12)  # Multiple Deliveries on the Shipment
+        c4 = ws2.cell(row=i, column=11)  # Distributed to EWM
+        c5 = ws2.cell(row=i, column=19)  # To Fill
+        d = ws2.cell(row=i, column=20)  # Include
+        if len(str(c1.value)) < delength or c2.value == 'Tentative' or c3.value == 'X' \
+                or c4.value == 'X' or c5.value <= 0:
+            d.value = 0
+        else:
+            d.value = 1
+
+    # saving the destination excel file
+    wb2.save('lwvr.xlsx')
+    # convert xlsx to csv and remove xlsx
+    read_file = pd.read_excel(r'lwvr.xlsx')
+    read_file.to_csv(r"lwvr.csv", index=None, header=True)
+    # os.remove('lwvr.xlsx')
+    # read source csv file
+    df = pd.read_csv('lwvr.csv')
+    # remove rows where Include == 0
+    df = df[df.Include != 0]
+    # remove extra columns
+    df = df.drop('CSA/Planner', axis=1)
+    df = df.drop('Means of Transport Description', axis=1)
+    df = df.drop('Distributed to EWM', axis=1)
+    df = df.drop('Multiple Deliveries on the Shipment', axis=1)
+    df = df.drop('Resource Max Weight', axis=1)
+    df = df.drop('Resource Max Weight Status', axis=1)
+    df = df.drop('Total Weight (Product Dependent Dunnage Calc)', axis=1)
+    df = df.drop('Available Weight', axis=1)
+    df = df.drop('Include', axis=1)
+    # format the data frame
+    df = df.rename(columns={"Freight Order Number": "Shipment", "Delivery Number": "Delivery",
+                            "Planned Load End Wk Nbr": "Plan_WK",
+                            "Planned Load End Date": "Plan_Date", "Origin Plant Desc": "Origin",
+                            "Dest Location Number": "Destination", "Dest Region": "State",
+                            "Transportation Mode Description": "Trans_Mode",
+                            "Total Pallets on Freight Order": "Pallets",
+                            "Gross Wt LBS (FH)": "Gross_Wt", "To Fill": "To_Fill"})
+    df = df.drop('Shipment', axis=1)
+    df = df.drop('Plan_WK', axis=1)
+    # create list of sources
+    sources = ["GOLDEN BREWERY", "MILWAUKEE BREWERY", "TRENTON BREWERY",
+               "FORT WORTH BREWERY", "SHENANDOAH BREWERY", "ALBANY BREWERY",
+               "IRWINDALE BREWERY", "GOLDEN DC", "PORTLAND DC", "ELIZABETH DC",
+               "ALBANY DC", "FORT WORTH DC", "MILWAUKEE DC",
+               "CHIP FALLS LEINENKUGEL BREWERY", "BACKUS Y JOHNSTON S.A.A.",
+               "TYSKIE BROWARY", "BAVARIA S.A.", "GROLSCH BREWERY",
+               "BIRRA PERONI Ã‚Â SPA", "CZECH REPUBLIC IMPORT",
+               "CANADA,MOLSON, MONTREAL IMPORT", "CANADA, MOLSON, TORONTO IMPORT"]
+    # replace all unavailable Origins with 0
+    df.loc[~df["Origin"].isin(sources), "Origin"] = 0
+    # create new data frame without Origin == 0
+    df = df[df.Origin != 0]
+    # replace column values with replacements
+    df.loc[df.Origin == "GOLDEN BREWERY", "Origin"] = 1000
+    df.loc[df.Origin == "MILWAUKEE BREWERY", "Origin"] = 1010
+    df.loc[df.Origin == "TRENTON BREWERY", "Origin"] = 1020
+    df.loc[df.Origin == "FORT WORTH BREWERY", "Origin"] = 1030
+    df.loc[df.Origin == "SHENANDOAH BREWERY", "Origin"] = 1040
+    df.loc[df.Origin == "ALBANY BREWERY", "Origin"] = 1060
+    df.loc[df.Origin == "IRWINDALE BREWERY", "Origin"] = 1070
+    df.loc[df.Origin == "GOLDEN DC", "Origin"] = 2000
+    df.loc[df.Origin == "PORTLAND DC", "Origin"] = 2020
+    df.loc[df.Origin == "ELIZABETH DC", "Origin"] = 2030
+    df.loc[df.Origin == "ALBANY DC", "Origin"] = 2060
+    df.loc[df.Origin == "FORT WORTH DC", "Origin"] = 2070
+    df.loc[df.Origin == "MILWAUKEE DC", "Origin"] = 2080
+    df.loc[df.Origin == "CHIP FALLS LEINENKUGEL BREWERY", "Origin"] = 5000
+    df.loc[df.Origin == "BACKUS Y JOHNSTON S.A.A.", "Origin"] = 6800
+    df.loc[df.Origin == "TYSKIE BROWARY", "Origin"] = 6810
+    df.loc[df.Origin == "BAVARIA S.A.", "Origin"] = 6850
+    df.loc[df.Origin == "GROLSCH BREWERY", "Origin"] = 6860
+    df.loc[df.Origin == "BIRRA PERONI Ã‚Â SPA", "Origin"] = 6870
+    df.loc[df.Origin == "CZECH REPUBLIC IMPORT", "Origin"] = 6880
+    df.loc[df.Origin == "CANADA,MOLSON, MONTREAL IMPORT", "Origin"] = 6890
+    df.loc[df.Origin == "CANADA, MOLSON, TORONTO IMPORT", "Origin"] = 6900
+    df.loc[df.Trans_Mode == "Intermodal", "Trans_Mode"] = "Intm"
+    # filling missing values
+    df.fillna(0)
+    # create new columns
+    df['Source_ID'] = df.agg('{0[Origin]}-{0[Trans_Mode]}-{0[Destination]}'.format, axis=1)
+    df['Prefill_%'] = df['Gross_Wt'] / (df['Gross_Wt'] + df['To_Fill'])
+    # format data frame columns
+    df = df.astype({"Delivery": int,  "Origin": int, "Pallets": int,
+                    "Gross_Wt": float, "To_Fill": float, "Prefill_%": float})
+    # reindex columns
+    df = df[['Delivery', 'Source_ID', 'Plan_Date', 'Origin', 'Trans_Mode',
+             'Destination', 'State', 'Pallets', 'Gross_Wt', 'To_Fill', 'Prefill_%']]
+    # convert data frame to dictionary
+    loads = df.set_index('Delivery').T.to_dict('list')
+    # print execution time
+    end_time = datetime.datetime.now()
+    lwvr_time = end_time - begin_time
+    print(f"End time:   {end_time}")
+    print(f"LWVR Time:  {lwvr_time}\n")
+    print(f"Dictionary created successfully")
+    return loads
+
+
+def import_updr(updr_file: str) -> dict:
+    """Get source data and create orders dictionary"""
+    # start timer
+    begin_time = datetime.datetime.now()
+    print(f"Start time: {begin_time}")
+    print(f"Importing data to dictionary")
+    # convert xlsx to csv and remove xlsx
+    read_file = pd.read_excel(updr_file, sheet_name='Unplanned Demand')
+    read_file.to_csv(r"UPDR.csv", index=None, header=True)
+    df = pd.read_csv('UPDR.csv', header=0)
+    # delete unwanted columns
+    df.drop(['Region', 'CSA Name', 'Source',
+             'Ship to Dist Name', 'City', 'OSKU Description', 'ABV',
+             'Run Frequency', 'Confirmed Order Units', 'Shipment Units',
+             'Standard Units per Partial Pallet', 'Partial Pallets of Unplanned',
+             'Line Item Weight of Unplanned', 'Total Weight of Unplanned',
+             'Max Vehicle Weight', 'Total Load Percent by Line Item',
+             'Total Load Percent by Source and Mode'], axis=1, inplace=True)
+    # format the data frame
+    df = df.rename(columns={"Plan Ship Yr-Wk": "Plan_WK", "Source Number": "Origin",
+                            "Ship To Number": "Destination", "OSKU Number": "OSKU",
+                            "MSKU Number": "MSKU", "Base UoM": "Base_UoM",
+                            "Sales Order Number": "SO", "Sales Order Line Item Number": "SO_Line",
+                            "Mode": "Trans_Mode", "Net Weight": "Unit_Wt",
+                            "Standard Units per Pallet": "U_Pallet",
+                            "Pallets of Unplanned": "Pallets"})
+    # remove lines without Trans_Mode
+    df.fillna(value=0, axis=1, inplace=True)
+    df = df[df.Trans_Mode != 0]
+    # replace column values with replacements
+    df.loc[df.Trans_Mode == "Truck", "Trans_Mode"] = 'Road'
+    df.loc[df.Trans_Mode == "Intermodal (Rail)", "Trans_Mode"] = 'Intm'
+    # calculate new variables
+    df['UPD'] = df['Unplanned Units'] * -1
+    df['Pallet_Wt'] = (df['Unit_Wt'] * df['U_Pallet']) / df['Pallets']
+    df['Source_ID'] = df.agg('{0[Origin]}-{0[Trans_Mode]}-{0[Destination]}'.format, axis=1)
+    df['Order_ID'] = df.agg('{0[SO]}-{0[MSKU]}'.format, axis=1)
+    # delete unwanted columns
+    df.drop('Unplanned Units', axis=1, inplace=True)
+    df.drop('OSKU', axis=1, inplace=True)
+    # reindex columns
+    df = df[['Order_ID', 'Source_ID', 'Plan_WK', 'Origin', 'Trans_Mode',
+             'Destination', 'State', 'Base_UoM', 'MSKU', 'SO', 'SO_Line',
+             'Unit_Wt', 'U_Pallet', 'Pallets']]
+    # sort 1) oldest to newest sales order, 2) kegs then cases, 3) oldest to newest plan week
+    df = df.sort_values(['SO', 'Base_UoM', 'Plan_WK'], ascending=[True, False, True])
+    # eliminate all unplanned demand from +2 weeks
+    today_date = datetime.datetime.today()                          # return today's date
+    confirm_end_date = today_date + datetime.timedelta(days=14)     # calculate confirmation week (today +14 days)
+    confirm_2wk = confirm_end_date.strftime("%Y-%W")                # format confirmation week as 'YYYY-WK'
+    df = df[df.Plan_WK != confirm_2wk]                              # eliminate rows in confirmation week
+    # convert data frame to dictionary
+    orders = df.set_index('Order_ID').T.to_dict('list')
+    # round down pallet count to remove partial pallets
+    for demand, order in orders.items():
+        order[12] = floor(order[12])
+
+    # print execution time
+    end_time = datetime.datetime.now()
+    updr_time = end_time - begin_time
+    print(f"End time:   {end_time}")
+    print(f"UPDR Time:  {updr_time}\n")
+    print(f"Dictionary created successfully")
+    return orders
+
+
+"""Send startup messages and begin timers"""
+print(f"Functions defined successfully")
+print(f"Importing data dictionaries...")
+# select load weight variance source file
+Tk().withdraw()                         # prevent root window
+lwvrfilename = askopenfilename()        # open file explorer window to select file
+# select unplanned demand source file
+Tk().withdraw()                         # prevent root window
+updrfilename = askopenfilename()        # open file explorer window to select file
+# begin data importing
+# start timer 1
+btime1 = datetime.datetime.now()
+loads = import_lwvr(lwvrfilename)
+etime1 = datetime.datetime.now()
+step1_time = etime1 - btime1
+print(f"Load Weight Variance Report dictionary imported successfully")
+# start timer 2
+btime2 = datetime.datetime.now()
+orders = import_updr(updrfilename)
+etime2 = datetime.datetime.now()
+step2_time = etime2 - btime2
+print(f"Unplanned Demand Report dictionary imported successfully")
+
+"""Delete key values pairs in orders dictionary that have no matches in the loads dictionary"""
+# start timer
+a_begin_time = datetime.datetime.now()
+print(f"Start time: {a_begin_time}")
+print(f"Removing unusable unplanned demand...")
+# loop into orders dictionary
+for demand, order in orders.items():
+    matches = 0
+    usource_id = order[0]  # grab source_id for matching
+    # count number of matches each order has in the loads dictionary
+    for delivery, load in loads.items():
+        lsource_id = load[0]  # grab source_id for matching
+        if lsource_id == usource_id:
+            matches = matches + 1
+        else:
+            continue
+    # set pallets to 0 if order source ID has no matches in loads dictionary
+    if matches == 0:
+        order[12] = 0
+    else:
+        continue
+
+print(f"Unmatched unplanned demand identified")
+# List of keys to be deleted from dictionary
+selectedKeys = list()
+# iterate over the list and add keys where pallets == 0 to a list
+for demand, order in orders.items():
+    u_pallets = order[12]  # grab number of pallets
+    # delete dictionary key if 0 pallets are available on the order
+    if u_pallets == 0:
+        selectedKeys.append(demand)
+    else:
+        continue
+
+# iterate over the list and delete corresponding key from dictionary
+for key in selectedKeys:
+    if key in orders:
+        del orders[key]
+
+print(f"Unmatched unplanned demand deleted successfully")
+
+"""Calculate starting totals for final results"""
+# find total number of starting pallets in orders dictionary
+print(f"Totaling number of unplanned demand pallets")
+all_pallets = 0
+for demand, order in orders.items():
+    u_pallets = order[12]
+    all_pallets = all_pallets + u_pallets
+
+print(f"Total starting pallets available:   {all_pallets}")
+
+"""Create Winshuttle script excel file"""
+print(f"Create Winshuttle script file")
+# mm/dd/yyyy
+date = datetime.datetime.today().strftime("%m-%d-%Y")
+# create file name as a variable
+filename = filepath + "\\Light Loads - FM36 - " + date + ".xlsx"
+# Create a workbook and add a worksheet.
+workbook = xlsxwriter.Workbook(filename)
+worksheet = workbook.add_worksheet('Script')
+# create formatting methods
+comma_format = workbook.add_format({'num_format': '#,##0.00'})
+merge_format = workbook.add_format({'align': 'center'})
+# write into new workbook
+worksheet.write(0, 0, 'RUN LOG')                                    # cell A1
+worksheet.write(0, 1, 'VALIDATE LOG')                               # cell B1
+worksheet.write(0, 2, 'Delivery')                                   # cell C1
+worksheet.write(0, 3, 'Sales Order')                                # cell D1
+worksheet.write(0, 4, 'MSKU')                                       # cell E1
+worksheet.write(0, 5, 'Line Item')                                  # cell F1
+worksheet.write(0, 6, 'Line Item')                                  # cell G1
+worksheet.write(0, 7, 'Units')                                      # cell H1
+worksheet.write(0, 8, 'Source ID')                                  # cell I1
+worksheet.write(0, 9, 'Pre To Fill')                                # cell J1
+worksheet.write(0, 10, 'Wt Assigned')                               # cell K1
+worksheet.write(0, 11, 'Plts Assigned')                             # cell L1
+worksheet.write(0, 12, 'New To Fill')                               # cell M1
+worksheet.merge_range('O1:P1', 'Execution Results', merge_format)   # cell O1:P1
+worksheet.write(1, 14, 'Total Pallets Assigned')                    # cell O2
+worksheet.write(2, 14, 'Total Weight Assigned')                     # cell O3
+worksheet.write(3, 14, 'Full Truck Equivalent')                     # cell O4
+worksheet.write(4, 14, 'Execution Time')                            # cell O5
+worksheet.write(1, 15, '=SUM($L:$L)', comma_format)                 # cell P2
+worksheet.write(2, 15, '=SUM($K:$K)', comma_format)                 # cell P3
+worksheet.write(3, 15, '=$P$3/45000', comma_format)                 # cell P4
+worksheet.set_column(0, 0, 45)
+worksheet.set_column(1, 1, 13)
+worksheet.set_column(2, 7, 12)
+worksheet.set_column(8, 8, 16.29)
+worksheet.set_column(9, 12, 12)
+worksheet.set_column(14, 14, 20.29)
+worksheet.set_column(15, 15, 13)
+
+"""Start the main assignment loop"""
+print(f"Creating assignment variables")
+# create variable to count how many pallets were assigned
+p = 0
+# set starting row and column for new worksheet
+row = 1
+col = 2
+# loop through dictionary of loads to work on
+print(f"Beginning unplanned demand assignment")
+for delivery, load in loads.items():
+    lsource_id = load[0]        # load source_id
+    to_fill = load[8]           # to_fill
+    # for each load, loop through dictionary of UPD available to find assignment matches
+    for demand, order in orders.items():
+        usource_id = order[0]   # order source_id
+        msku = order[7]         # msku
+        so = order[8]           # sales order
+        line = order[9]         # sales order line item
+        unit_wt = order[10]     # unit weight
+        u_p_pal = order[11]     # units per pallet
+        pallets = order[12]     # pallets
+        pallet_wt = unit_wt * u_p_pal
+        # make assignment if source_ids match
+        if lsource_id == usource_id:
+            # calculate how much UPD to assign using the assign() function
+            assigned = assign(target=to_fill, p_wt=pallet_wt, t_plt=pallets)
+            # [t_plt, filled, n_target] output list from assign() function
+            tot_plt = assigned[0]           # total pallets assigned
+            a_filled = assigned[1]          # weight assigned
+            n_to_fill = assigned[2]         # new to fill target
+            units = tot_plt * u_p_pal       # find how many units were assigned
+            # if units were assigned
+            if units > 0:
+                # update orders dictionary with new pallets available
+                order[12] = pallets - tot_plt
+                # store to fill before assignment
+                orig_to_fill = to_fill
+                # update to fill amount with new target to fill amount
+                to_fill = n_to_fill
+                # print results in next row of script file
+                worksheet.write(row, 2, delivery)       # column C - Delivery
+                worksheet.write(row, 3, so)             # column D - Sales Order
+                worksheet.write(row, 4, msku)           # column E - MSKU
+                worksheet.write(row, 5, line)           # column F - Line Item
+                worksheet.write(row, 6, line)           # column G - Line Item
+                worksheet.write(row, 7, units)          # column H - Units Added
+                worksheet.write(row, 8, usource_id)     # column I - Source ID
+                worksheet.write(row, 9, orig_to_fill)   # column J - Pre To Fill
+                worksheet.write(row, 10, a_filled)      # column K - Wt Assigned
+                worksheet.write(row, 11, tot_plt)       # column L - Plts Assigned
+                worksheet.write(row, 12, to_fill)       # column M - New To Fill
+                # increase row index
+                row += 1
+            else:
+                # if no units are assigned continue to next line
+                continue
+        else:
+            # if the next line doesn't match continue to next line
+            continue
+
+"""Calculate totals for final results and wrap up script"""
+# find total number of remaining pallets in orders dictionary
+print(f"Totaling unplanned demand assigned...")
+count_pallets = 0
+for demand, order in orders.items():
+    u_pallets = order[12]
+    count_pallets = count_pallets + u_pallets
+
+print(f"Assignment completed")
+# print execution time
+a_end_time = datetime.datetime.now()
+assign_time = a_end_time - a_begin_time
+print(f"End time:       {a_end_time}")
+print(f"Assign Time:    {assign_time}")
+print(f"Light loads filled and Winshuttle script created")
+# print total script execution and results time
+s_e_time = datetime.datetime.now()
+t_script_time = s_e_time - s_s_time
+s_script_time = str(t_script_time)
+# add in results fields
+worksheet.write(4, 15, s_script_time)         # cell P5
+# close created workbook
+workbook.close()
+print(f"End time:       {a_end_time}\n\n")
+print(f"Total UPD assignment script time")
+print(f"Import Loads Time:      {step1_time}")
+print(f"Import Orders Time:     {step2_time}")
+print(f"Assignment Time:        {assign_time}")
+print(f"Total script Time:      {t_script_time}")
