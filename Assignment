@@ -448,31 +448,33 @@ merge_format = workbook.add_format({'align': 'center'})
 worksheet.write(0, 0, 'RUN LOG')                                    # cell A1
 worksheet.write(0, 1, 'VALIDATE LOG')                               # cell B1
 worksheet.write(0, 2, 'Delivery')                                   # cell C1
-worksheet.write(0, 3, 'Sales Order')                                # cell D1
-worksheet.write(0, 4, 'MSKU')                                       # cell E1
-worksheet.write(0, 5, 'Line Item')                                  # cell F1
+worksheet.write(0, 3, 'Select Date')                             # cell D1
+worksheet.write(0, 4, 'Sales Order')                                # cell E1
+worksheet.write(0, 5, 'MSKU')                                       # cell F1
 worksheet.write(0, 6, 'Line Item')                                  # cell G1
-worksheet.write(0, 7, 'Units')                                      # cell H1
-worksheet.write(0, 8, 'Source ID')                                  # cell I1
-worksheet.write(0, 9, 'Start ToFill')                               # cell J1
-worksheet.write(0, 10, 'Wt Assigned')                               # cell K1
-worksheet.write(0, 11, 'Plts Assigned')                             # cell L1
-worksheet.write(0, 12, 'New ToFill')                                # cell M1
-worksheet.merge_range('O1:P1', 'Execution Results', merge_format)   # cell O1:P1
-worksheet.write(1, 14, 'Total Pallets Assigned')                    # cell O2
-worksheet.write(2, 14, 'Total Weight Assigned')                     # cell O3
-worksheet.write(3, 14, 'Full Truck Equivalent')                     # cell O4
-worksheet.write(4, 14, 'Execution Time')                            # cell O5
-worksheet.write(1, 15, '=SUM($L:$L)', comma_format)                 # cell P2
-worksheet.write(2, 15, '=SUM($K:$K)', comma_format)                 # cell P3
-worksheet.write(3, 15, '=$P$3/43000', comma_format)                 # cell P4
+worksheet.write(0, 7, 'Line Item')                                  # cell H1
+worksheet.write(0, 8, 'Units')                                      # cell I1
+# worksheet.write(0, 8, 'Source ID')                                # cell J1
+worksheet.write(0, 9, 'Plan Date')                                  # cell J1
+worksheet.write(0, 10, 'Start ToFill')                              # cell K1
+worksheet.write(0, 11, 'Wt Assigned')                               # cell L1
+worksheet.write(0, 12, 'Plts Assigned')                             # cell M1
+worksheet.write(0, 13, 'New ToFill')                                # cell N1
+worksheet.merge_range('P1:Q1', 'Phase 1: Light Load Filling', merge_format)   # cell P1:Q1
+worksheet.write(1, 15, 'Total Pallets Assigned')                    # cell P2
+worksheet.write(2, 15, 'Total Weight Assigned')                     # cell P3
+worksheet.write(3, 15, 'Full Truck Equivalent')                     # cell P4
+worksheet.write(4, 15, 'Execution Time')                            # cell P5
+worksheet.write(1, 16, '=SUM($M:$M)', comma_format)                 # cell P2
+worksheet.write(2, 16, '=SUM($L:$L)', comma_format)                 # cell Q3
+worksheet.write(3, 16, '=$Q$3/43000', comma_format)                 # cell Q4
 worksheet.set_column(0, 0, 45)
 worksheet.set_column(1, 1, 13)
-worksheet.set_column(2, 7, 12)
-worksheet.set_column(8, 8, 16.29)
-worksheet.set_column(9, 12, 12)
-worksheet.set_column(14, 14, 20.29)
-worksheet.set_column(15, 15, 13)
+worksheet.set_column(2, 8, 12)
+worksheet.set_column(9, 9, 16.29)
+worksheet.set_column(10, 13, 12)
+worksheet.set_column(15, 15, 20.29)
+worksheet.set_column(16, 16, 13)
 
 """Start the main assignment loop"""
 # create variable to count how many pallets were assigned
@@ -485,7 +487,15 @@ print(f"\n//////////////////////////////////////////////////////////////////////
 print(f"Beginning unplanned demand assignment")
 for delivery, load in loads.items():
     lsource_id = load[0]        # load source_id
+    plan_date = load[1]         # plan_date YYYY-MM-DD
+    p_year = plan_date[0:4]     # year
+    p_month = plan_date[5:7]    # month
+    p_day = plan_date[8:10]      # month
+    plan_date = p_month + '-' + p_day + '-' + p_year
     to_fill = load[8]           # to_fill
+    today_date = datetime.datetime.today()  # return today's date
+    n_year_today = today_date + datetime.timedelta(days=365)  # calculate next year today
+    s_date = n_year_today.strftime("%m-%d-%Y")  # format confirmation week as 'YYYY-WK
     # for each load, loop through dictionary of UPD available to find assignment matches
     for demand, order in orders.items():
         usource_id = order[0]   # order source_id
@@ -515,16 +525,18 @@ for delivery, load in loads.items():
                 to_fill = n_to_fill
                 # print results in next row of script file
                 worksheet.write(row, 2, delivery)       # column C - Delivery
-                worksheet.write(row, 3, so)             # column D - Sales Order
-                worksheet.write(row, 4, msku)           # column E - MSKU
-                worksheet.write(row, 5, line)           # column F - Line Item
-                worksheet.write(row, 6, line)           # column G - Line Item
-                worksheet.write(row, 7, units)          # column H - Units Added
-                worksheet.write(row, 8, usource_id)     # column I - Source ID
-                worksheet.write(row, 9, orig_to_fill)   # column J - Pre To Fill
-                worksheet.write(row, 10, a_filled)      # column K - Wt Assigned
-                worksheet.write(row, 11, tot_plt)       # column L - Plts Assigned
-                worksheet.write(row, 12, to_fill)       # column M - New To Fill
+                worksheet.write(row, 3, s_date)       # column d - Delivery selection date
+                worksheet.write(row, 4, so)             # column e - Sales Order
+                worksheet.write(row, 5, msku)           # column f - MSKU
+                worksheet.write(row, 6, line)           # column g - Line Item
+                worksheet.write(row, 7, line)           # column h - Line Item
+                worksheet.write(row, 8, units)          # column i - Units Added
+                # worksheet.write(row, 9, usource_id)     # column j - Source ID
+                worksheet.write(row, 9, plan_date)     # column j - Source ID
+                worksheet.write(row, 10, orig_to_fill)   # column k - Pre To Fill
+                worksheet.write(row, 11, a_filled)      # column l - Wt Assigned
+                worksheet.write(row, 12, tot_plt)       # column m - Plts Assigned
+                worksheet.write(row, 13, to_fill)       # column n - New To Fill
                 # increase row index
                 row += 1
             else:
@@ -552,7 +564,7 @@ s_e_time = datetime.datetime.now()
 t_script_time = s_e_time - s_s_time
 s_script_time = str(t_script_time)
 # add in results fields
-worksheet.write(4, 15, s_script_time)         # cell P5
+worksheet.write(4, 16, s_script_time)         # cell P5
 # close created workbook
 workbook.close()
 print(f"End time:                           {a_end_time}")
@@ -708,7 +720,7 @@ for demand, all_order in all_orders.items():
 
 # calculate average lane weight
 a_t_wt = sum(avg_target) / len(avg_target)
-a_t_formula = '=$P$5*' + str(round(a_t_wt, 2))
+a_t_formula = '=$Q$5*' + str(round(a_t_wt, 2))
 
 """Create new workbook to output results"""
 # mm/dd/yyyy
@@ -726,39 +738,39 @@ worksheet.write(0, 0, 'RUN LOG')                                    # cell A1
 worksheet.write(0, 1, 'VALIDATE LOG')                               # cell B1
 worksheet.write(0, 2, 'Delivery')                                   # cell C1
 worksheet.write(1, 2, 1)                                            # cell C2
-worksheet.write(0, 3, 'Sales Order')                                # cell D1
-worksheet.write(0, 4, 'MSKU')                                       # cell E1
-worksheet.write(0, 5, 'Line Item')                                  # cell F1
-worksheet.write(0, 6, 'Line Item')                                  # cell G1
-worksheet.write(0, 7, 'Units')                                      # cell H1
-worksheet.write(0, 8, 'Source ID')                                  # cell I1
-worksheet.write(0, 9, 'Start ToFill')                               # cell J1
-worksheet.write(0, 10, 'Wt Assigned')                               # cell K1
-worksheet.write(0, 11, 'Plts Assigned')                             # cell L1
-worksheet.write(0, 12, 'New ToFill')                                # cell M1
-worksheet.write(0, 13, 'Cutoff Met')                                # cell N1
-worksheet.merge_range('O1:P1', 'Execution Results', merge_format)   # cell O1:P1
-worksheet.write(0, 16, 'Shipment')                                  # cell Q1
-worksheet.write(0, 17, 'Status')                                    # cell R1
-worksheet.write(0, 18, 'Lines')                                     # cell S1
-worksheet.write(1, 14, 'Total Pallets Assigned')                    # cell O2
-worksheet.write(2, 14, 'Total Weight Assigned')                     # cell O3
-worksheet.write(3, 14, 'Full Truck Wt Assigned')                    # cell O4
-worksheet.write(4, 14, 'Full Trucks Created')                       # cell O5
-worksheet.write(5, 14, 'Execution Time')                            # cell O6
-worksheet.write(1, 15, '=SUM($L:$L)', comma_format)                 # cell P2
-worksheet.write(2, 15, '=SUM($K:$K)', comma_format)                 # cell P3
-worksheet.write_formula('P4', a_t_formula, comma_format)            # cell P4
-worksheet.write(4, 15, '=SUM($N:$N)', comma_format)                 # cell P5
+worksheet.write(0, 3, 'Select Date')                                # cell D1
+worksheet.write(0, 4, 'Sales Order')                                # cell D1
+worksheet.write(0, 5, 'MSKU')                                       # cell E1
+worksheet.write(0, 6, 'Line Item')                                  # cell F1
+worksheet.write(0, 7, 'Line Item')                                  # cell G1
+worksheet.write(0, 8, 'Units')                                      # cell H1
+worksheet.write(0, 9, 'Plan Date')                                  # cell I1
+worksheet.write(0, 10, 'Start ToFill')                               # cell J1
+worksheet.write(0, 11, 'Wt Assigned')                               # cell K1
+worksheet.write(0, 12, 'Plts Assigned')                             # cell L1
+worksheet.write(0, 13, 'New ToFill')                                # cell M1
+worksheet.write(0, 14, 'Cutoff Met')                                # cell N1
+worksheet.merge_range('P1:Q1', 'Phase 2: New Load Planning', merge_format)   # cell O1:P1
+worksheet.write(0, 17, 'Shipment')                                  # cell Q1
+worksheet.write(0, 18, 'Status')                                    # cell R1
+worksheet.write(0, 19, 'Lines')                                     # cell S1
+worksheet.write(1, 15, 'Total Pallets Assigned')                    # cell O2
+worksheet.write(2, 15, 'Total Weight Assigned')                     # cell O3
+worksheet.write(3, 15, 'Full Truck Wt Assigned')                    # cell O4
+worksheet.write(4, 15, 'Full Trucks Created')                       # cell O5
+worksheet.write(5, 15, 'Execution Time')                            # cell O6
+worksheet.write(1, 16, '=SUM($M:$M)', comma_format)                 # cell P2
+worksheet.write(2, 16, '=SUM($L:$L)', comma_format)                 # cell P3
+worksheet.write_formula('Q4', a_t_formula, comma_format)            # cell P4
+worksheet.write(4, 16, '=SUM($O:$O)', comma_format)                 # cell P5
 # worksheet.write(4, 15, a_t_formula, comma_format)                   # cell P5
 worksheet.set_column(0, 0, 45)
 worksheet.set_column(1, 1, 13)
-worksheet.set_column(2, 7, 12)
-worksheet.set_column(8, 8, 16.29)
-worksheet.set_column(9, 12, 12)
-worksheet.set_column(13, 13, 9.86)
-worksheet.set_column(14, 14, 20.29)
-worksheet.set_column(15, 15, 13)
+worksheet.set_column(2, 8, 12)
+worksheet.set_column(9, 9, 16.29)
+worksheet.set_column(10, 13, 12)
+worksheet.set_column(15, 15, 20.29)
+worksheet.set_column(16, 16, 13)
 
 """Start the main building loop"""
 # create variable to count how many pallets were assigned
@@ -772,6 +784,11 @@ print(f"Beginning unplanned demand assignment")
 for shipments, all_order in all_orders.items():
     allsource_id = all_order[0]         # load source_id
     target_wt = all_order[13]           # target wt
+    today_date = datetime.datetime.today()  # return today's date
+    n_year_today = today_date + datetime.timedelta(days=365)  # calculate next year today
+    s_date = n_year_today.strftime("%m-%d-%Y")  # format confirmation week as 'YYYY-WK
+    today_14 = today_date + datetime.timedelta(days=14)  # calculate next year today
+    twks_date = today_14.strftime("%m-%d-%Y")  # format confirmation week as 'YYYY-WK
     # for each load, loop through dictionary of UPD available to find assignment matches
     for demand, n_order in n_orders.items():
         usource_id = n_order[0]           # order source_id
@@ -801,16 +818,17 @@ for shipments, all_order in all_orders.items():
                 target_wt = n_to_fill
                 # print results in next row of script file
                 worksheet.write(row, 2, l_num)                          # column C - Delivery
-                worksheet.write(row, 3, so)                             # column D - Sales Order
-                worksheet.write(row, 4, msku)                           # column E - MSKU
-                worksheet.write(row, 5, line)                           # column F - Line Item
-                worksheet.write(row, 6, line)                           # column G - Line Item
-                worksheet.write(row, 7, units)                          # column H - Units Added
-                worksheet.write(row, 8, usource_id)                     # column I - Source ID
-                worksheet.write(row, 9, orig_to_fill, comma_format)     # column J - Pre To Fill
-                worksheet.write(row, 10, a_filled, comma_format)        # column K - Wt Assigned
-                worksheet.write(row, 11, tot_plt)                       # column L - Plts Assigned
-                worksheet.write(row, 12, target_wt, comma_format)       # column M - New To Fill
+                worksheet.write(row, 3, s_date)                         # column D - select date
+                worksheet.write(row, 4, so)                             # column e - Sales Order
+                worksheet.write(row, 5, msku)                           # column f - MSKU
+                worksheet.write(row, 6, line)                           # column g - Line Item
+                worksheet.write(row, 7, line)                           # column h - Line Item
+                worksheet.write(row, 8, units)                          # column i - Units Added
+                worksheet.write(row, 9, twks_date)                     # column j - Source ID
+                worksheet.write(row, 10, orig_to_fill, comma_format)     # column k - Pre To Fill
+                worksheet.write(row, 11, a_filled, comma_format)        # column l - Wt Assigned
+                worksheet.write(row, 12, tot_plt)                       # column m - Plts Assigned
+                worksheet.write(row, 13, target_wt, comma_format)       # column n - New To Fill
                 # increase row index
                 row += 1
             else:
@@ -837,8 +855,8 @@ print(f"Entering formulas...")
 for i in range(3, row1):
     # =IF(M2>M3,C2,C2+1)
     inp_cell = 'C' + str(i)
-    cell1 = 'M' + str(i - 1)
-    cell2 = 'M' + str(i)
+    cell1 = 'N' + str(i - 1)
+    cell2 = 'N' + str(i)
     cell3 = 'C' + str(i - 1)
     formula = '=IF(' + cell1 + '>' + cell2 + ',' + cell3 + ',' + cell3 + '+1)'
     # input string as formula
@@ -847,10 +865,10 @@ for i in range(3, row1):
 # input formula for column n starting in cell N2
 for i in range(2, row2):
     # =IF(OR(C2<C3,ISBLANK(C3)),IF(M2<{cutoff},1,0),0)
-    inp_cell = 'N' + str(i)
+    inp_cell = 'O' + str(i)
     cell1 = 'C' + str(i)
     cell2 = 'C' + str(i + 1)
-    cell3 = 'M' + str(i)
+    cell3 = 'N' + str(i)
     formula = '=IF(OR(' + cell1 + '<' + cell2 + ',ISBLANK(' + cell2 + ')),IF(' + cell3 + '<' + cutoff + ',1,0),0)'
     # input string as formula
     worksheet.write_formula(inp_cell, formula)
@@ -858,26 +876,26 @@ for i in range(2, row2):
 # input load completion count list starting in cell Q2
 l_comp = 1
 for i in range(1, row5):
-    inp_cell = 'Q' + str(i)
+    inp_cell = 'R' + str(i)
     # worksheet.write_formula(inp_cell, l_comp1)
-    worksheet.write(i, 16, l_comp)
+    worksheet.write(i, 17, l_comp)
     l_comp += 1
 
 # input formula for column r starting in cell R2
 for i in range(2, row6):
     # =IF(Q2>$P$4,"-",IF(SUMIF($C:$C,Q2,$N:$N)=1,"Filled", "Light"))
-    inp_cell = 'R' + str(i)
-    cell1 = 'Q' + str(i)
-    formula = '=IF(' + cell1 + '>$P$4,"-",IF(SUMIF($C:$C,' + cell1 + ',$N:$N)=1,"Filled", "Light"))'
+    inp_cell = 'S' + str(i)
+    cell1 = 'R' + str(i)
+    formula = '=IF(' + cell1 + '>$Q$5,"-",IF(SUMIF($C:$C,' + cell1 + ',$O:$O)=1,"Filled", "Light"))'
     # input string as formula
     worksheet.write_formula(inp_cell, formula)
 
 # input formula for column s starting in cell S2
 for i in range(2, row7):
     # =IF(R2="-","-",COUNTIF($C:$C,Q2))
-    inp_cell = 'S' + str(i)
-    cell1 = 'R' + str(i)
-    cell2 = 'Q' + str(i)
+    inp_cell = 'T' + str(i)
+    cell1 = 'S' + str(i)
+    cell2 = 'R' + str(i)
     formula = '=IF(' + cell1 + '="-","-",COUNTIF($C:$C,' + cell2 + '))'
     # input string as formula
     worksheet.write_formula(inp_cell, formula)
@@ -891,7 +909,7 @@ s_e_time2 = datetime.datetime.now()
 t_script_time2 = s_e_time2 - s_s_time2
 s_script_time2 = str(t_script_time2)
 # add in results fields
-worksheet.write(5, 15, s_script_time2)         # cell P6
+worksheet.write(5, 16, s_script_time2)         # cell P6
 # close created workbook
 workbook.close()
 
