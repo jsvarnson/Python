@@ -1,0 +1,76 @@
+import win32com.client
+
+EMAIL_ACCOUNT = 'Joseph.Arnson@MolsonCoors.com'  # e.g. 'good.employee@importantcompany.com'
+ITER_FOLDER = 'Tableau_Data_Source'  # e.g. 'IterationFolder'
+MOVE_TO_FOLDER = 'Tableau_Data_Archive'  # e.g 'ProcessedFolder'
+SAVE_AS_PATH = 'C:\\Users\\JSVAR\\Molson Coors Brewing Company\\CSE Metrics and Reporting - General\\' \
+               'Key Metrics\\Tableau\\Tableau_UPD_Source'  # e.g.r'C:\DownloadedCSV'
+EMAIL_SUBJ_SEARCH_STRING = 'UPD_Dashboard-Tableau_Data_Source'  # e.g. 'Email to download'
+
+
+def find_download_csv_in_outlook():
+    try:
+        out_app = win32com.client.gencache.EnsureDispatch('Outlook.Application')
+    except AttributeError:
+        # Corner case dependencies.
+        import os
+        import re
+        import sys
+        import shutil
+        # Remove cache and try again.
+        MODULE_LIST = [m.__name__ for m in sys.modules.values()]
+        for module in MODULE_LIST:
+            if re.match(r'win32com\.gen_py\..+', module):
+                del sys.modules[module]
+        shutil.rmtree(os.path.join(os.environ.get('LOCALAPPDATA'), 'Temp', 'gen_py'))
+        from win32com import client
+        out_app = win32com.client.gencache.EnsureDispatch('Outlook.Application')
+    out_namespace = out_app.GetNamespace('MAPI')
+    out_iter_folder = out_namespace.Folders[EMAIL_ACCOUNT].Folders[ITER_FOLDER]
+    out_move_to_folder = out_namespace.Folders[EMAIL_ACCOUNT].Folders[MOVE_TO_FOLDER]
+    char_length_of_search_substring = len(EMAIL_SUBJ_SEARCH_STRING)
+    # Count all items in the sub-folder
+    item_count = out_iter_folder.Items.Count
+    if out_iter_folder.Items.Count > 0:
+        for i in range(item_count, 0, -1):
+            message = out_iter_folder.Items[i]
+            # Find only mail items and report, note, meeting etc items
+            if '_MailItem' in str(type(message)):
+                print(type(message))
+                if message.Subject[0:char_length_of_search_substring] == EMAIL_SUBJ_SEARCH_STRING \
+                        and message.Attachments.Count > 0:
+                    for attachment in message.Attachments:
+                        if attachment.FileName[-4:] == 'xlsx':
+                            attachment.SaveAsFile(SAVE_AS_PATH + '\\' + attachment.FileName)
+                            message.Move(out_move_to_folder)
+    else:
+        print("No items found in: {}".format(ITER_FOLDER))
+    return
+
+
+if __name__ == '__main__':
+    find_download_csv_in_outlook()
+
+# def find_download_csv_in_outlook():
+#     out_app = win32com.client.gencache.EnsureDispatch('Outlook.Application')
+#     out_namespace = out_app.GetNamespace('MAPI')
+#     out_iter_folder = out_namespace.Folders[EMAIL_ACCOUNT].Folders[ITER_FOLDER]
+#     out_move_to_folder = out_namespace.Folders[EMAIL_ACCOUNT].Folders[MOVE_TO_FOLDER]
+#     char_length_of_search_substring = len(EMAIL_SUBJ_SEARCH_STRING)
+#     # Count all items in the sub-folder
+#     item_count = out_iter_folder.Items.Count
+#     if out_iter_folder.Items.Count > 0:
+#         for i in range(item_count, 0, -1):
+#             message = out_iter_folder.Items[i]
+#             # Find only mail items and report, note, meeting etc items
+#             if '_MailItem' in str(type(message)):
+#                 print(type(message))
+#                 if message.Subject[0:char_length_of_search_substring] == EMAIL_SUBJ_SEARCH_STRING \
+#                         and message.Attachments.Count > 0:
+#                     for attachment in message.Attachments:
+#                         if attachment.FileName[-4:] == 'xlsx':
+#                             attachment.SaveAsFile(SAVE_AS_PATH + '\\' + attachment.FileName)
+#                             message.Move(out_move_to_folder)
+#     else:
+#         print("No items found in: {}".format(ITER_FOLDER))
+#     return
