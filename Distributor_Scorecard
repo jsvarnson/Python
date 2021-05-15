@@ -1,0 +1,754 @@
+# import packages
+import ctypes
+import datetime
+import glob
+import os
+import tkinter as tk
+import warnings
+from collections import OrderedDict
+from copy import deepcopy
+from tkinter import *
+from tkinter import Tk
+from tkinter import filedialog
+from tkinter.filedialog import askopenfilename
+import numpy as np
+import pandas as pd
+import xlsxwriter
+from PIL import ImageTk, Image
+from itertools import islice
+from math import floor
+from plotnine import *
+from functools import reduce
+
+
+def drop_prefix(self, prefix):
+    """Remove column header name prefixes from dataframes"""
+    self.columns = self.columns.str.lstrip(prefix)
+    return self
+
+
+def resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+
+def so_splitter(string: str) -> list:
+    """Dynamically split requirement element string into sales order and line item numbers"""
+    so_list = string.split('/')
+    so_list = [int(so_list[0]), int(so_list[1])]
+    return so_list
+
+
+def os_split_fixer(string):
+    """Separate and rejoin selected file path with correct operating system separator"""
+    delimiters = '/', '\\'
+    maxsplit = 0
+    regexPattern = '|'.join(map(re.escape, delimiters))
+    splits = re.split(regexPattern, string, maxsplit)
+    splitlist = []
+    for split in splits:
+        splitlist.append(split + os.sep)
+
+    path = ''.join(splitlist)
+    splitpath = path[:-1]
+    return splitpath
+
+
+def no_labels(values):
+    """Create a dynamically long list of blank values to remove tick marks from plot axes"""
+    return [""] * len(values)
+
+
+def oosip_barplot(data, savepath, avg: float):
+    """Create plot of the oos incident percentages for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Incidents % by Week - ' + str('{:.1%}'.format(float(avg))) + ' Average'
+    png = 'OOSi Percentages by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='OOSi_%'), alpha=.25, color='#1496FF', fill='#1496FF', stat='identity')
+            + geom_label(mapping=aes(label='OOSi_%', x='Yr-Wk', y='OOSi_%'), va='top',
+                         format_string='{:.1%}', nudge_y=-.004, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=11)
+            + labs(x='', y='OOS Incidents %', title=plottitle)
+            + geom_hline(yintercept=avg, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'),   # rotation=0, hjust=1
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def oosic_barplot(data, savepath, avg: float):
+    """Create plot of the oos incidents for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Incidents by Week - ' + str('{:.1f}'.format(float(avg))) + ' Average'
+    png = 'OOS Incidents by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='OOSi'), alpha=.25, color='#091F3F', fill='#091F3F', stat='identity')
+            + geom_label(mapping=aes(label='OOSi', x='Yr-Wk', y='OOSi'), va='top',
+                         format_string='{:,}', nudge_y=-.35, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=11)
+            + labs(x='', y='OOS Incidents', title=plottitle)
+            + geom_hline(yintercept=avg, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def oosvp_barplot(data, savepath: str, avg: float):
+    """Create plot of the oos volume percentages for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Volume % by Week - ' + str('{:.1%}'.format(float(avg))) + ' Average'
+    png = 'OOSv Percentages by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='OOSv_%'), alpha=.25, color='#1496FF', fill='#1496FF', stat='identity')
+            + geom_label(mapping=aes(label='OOSv_%', x='Yr-Wk', y='OOSv_%'), va='top',
+                         format_string='{:.1%}', nudge_y=-.001, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=11)
+            + labs(x='', y='OOS Volume %', title=plottitle)
+            + geom_hline(yintercept=avg, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def oosvc_barplot(data, savepath: str, avg: float):
+    """Create plot of the oos volume for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Volume by Week - ' + str('{:,.1f}'.format(float(avg))) + ' Average'
+    png = 'OOS Volume by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='OOSv'), alpha=.25, color='#091F3F', fill='#091F3F', stat='identity')
+            + geom_label(mapping=aes(label='OOSv', x='Yr-Wk', y='OOSv'), va='top',
+                         format_string='{:,.1f}', nudge_y=-1.5, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=9)
+            + labs(x='', y='OOS Volume (BBLs)', title=plottitle)
+            + geom_hline(yintercept=avg, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def roosvc_barplot(data, savepath: str, dirname: str):
+    """Create plot of the oos volume for each region"""
+    plottitle = 'OOS Volume by Region ' + dirname
+    png = 'OOS Volume by Region - ' + dirname + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Region', y='OOSv'), alpha=.25, color='#1496FF', fill='#1496FF', stat='identity')
+            + geom_text(aes(label='OOSv_%', x='Region', y='OOSv_%'), position='identity',
+                        nudge_y=10, va='bottom', format_string='{:.2%}', color='#091F3F', size=12)
+            + geom_text(aes(label='OOSv', x='Region', y='OOSv', angle=0), position='identity',
+                        nudge_y=10, va='bottom', format_string='{:,.2f}', color='#091F3F', size=11)
+            + labs(x='', y='OOS Volume (BBLs)', title=plottitle)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=8, color='#091F3F', ha='center',
+                                         weight='light', rotation=0, hjust=.5),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def soosvc_barplot(data, savepath: str, dirname: str):
+    """Create plot of the oos volume for each Segment"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Volume by Segment ' + dirname
+    png = 'OOS Volume by Segment - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Segment', y='OOSv'), alpha=.25, color='#091F3F', fill='#091F3F', stat='identity')
+            # + geom_text(aes(label='OOSv_%', x='Segment', y='OOSv_%'), position='identity',
+            #             nudge_y=-20, va='top', format_string='{:.0%}', color='#1496FF', size=8)
+            # + geom_text(aes(label='OOSv', x='Segment', y='OOSv', angle=90), position='identity',
+            #             nudge_y=-5, va='top', format_string='{:,.2f}', color='#1496FF', size=9)
+            + labs(x='', y='OOS Volume (BBLs)', title=plottitle)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=8, color='#091F3F', ha='center',
+                                         weight='light', rotation=45, hjust=1),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def soosvp_barplot(data, vtarget, savepath: str, dirname: str):
+    """Create plot of the oos volume percentages for each segment"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'OOS Volume by Segment ' + dirname + ' - ' + str('{:.0%}'.format(float(vtarget))) + ' Target'
+    png = 'OOS Volume Percentages by Segment - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Segment', y='OOSv_%'), alpha=.25, color='#1496FF', fill='#1496FF',
+                       stat='identity')
+            + geom_text(aes(label='OOSv_%', x='Segment', y='OOSv_%'), position='identity',
+                        nudge_y=-.001, va='top', format_string='{:.0%}', color='#091F3F', size=8)
+            + labs(x='', y='OOS Volume %', title=plottitle)
+            + geom_hline(yintercept=vtarget, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=8, color='#091F3F', ha='center',
+                                         weight='light', rotation=45, hjust=1),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=8, verbose=False)  # save new file to directory
+    return png
+
+
+def doip_barplot(data, savepath, avgdoi: float):
+    """Create plot of the DOI results for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'Days of Inventory by Week - ' + str('{:.1f}'.format(avgdoi)) + ' Average'
+    png = 'Days of Inventory by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='DOI'), alpha=.25, color='#1496FF', fill='#1496FF', stat='identity')
+            + geom_label(mapping=aes(label='DOI', x='Yr-Wk', y='DOI'), va='top',
+                         format_string='{:,}', nudge_y=-.5, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=11)
+            + labs(x='', y='Days of Inventory', title=plottitle)
+            + geom_hline(yintercept=avgdoi, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'),
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=9, verbose=False)  # save new file to directory
+    return png
+
+
+def fap_barplot(data, savepath, avg: float):
+    """Create plot of the forecast accuracy percentages for each week"""
+    # get today's date
+    today = datetime.datetime.today().strftime("%m-%d-%Y")  # mm-dd-yyyy
+    plottitle = 'Forecast Accuracy % by Week - ' + str('{:.1%}'.format(float(avg))) + ' Average'
+    png = 'Forecast Accuracy % by Week - ' + today + '.png'  # name file
+    plot = (ggplot(data=data)
+            + geom_bar(mapping=aes(x='Yr-Wk', y='Fcst_Acc'), alpha=.25, color='#1496FF', fill='#1496FF', stat='identity')
+            + geom_label(mapping=aes(label='Fcst_Acc', x='Yr-Wk', y='Fcst_Acc'), va='top',
+                         format_string='{:.1%}', nudge_y=-.02, label_size=.25, data=data,
+                         alpha=1, position='identity', color='#091F3F', size=10)
+            + labs(x='', y='Forecast Accuracy %', title=plottitle)
+            + geom_hline(yintercept=avg, color='#FFB000', size=1, alpha=.5)
+            + theme_gray()
+            + theme(
+                plot_title=element_text(style='italic', size=12, color='#091F3F', ha='center', weight='light'),
+                figure_size=(8, 4.944),
+                legend_position=(.8, .8),
+                legend_title=element_text(text='', style='oblique', size=10, color='#091F3F', ha='center',
+                                          weight='light'),
+                legend_title_align='right',
+                legend_background=element_rect(color='', size=1, fill='none'),
+                legend_box_background=element_rect(color='#091F3F', size=9, fill='none', weight='light'),
+                legend_direction='vertical',
+                axis_line_x=element_line(size=1, color='#091F3F'),
+                axis_line_y=element_line(size=1, color='#091F3F'),
+                axis_text_x=element_text(text='', style='italic', size=9, color='#091F3F',
+                                         ha='center', weight='light'), # , rotation=45, hjust=.5
+                axis_text_y=element_text(style='italic', size=8, color='#091F3F', ha='right', weight='light'),
+                axis_title_x=element_text(size=10, color='#091F3F', ha='center', weight='light'),
+                axis_title_y=element_text(size=10, color='#091F3F', ha='center', weight='light')))
+    png = os.path.join(savepath, png)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, height=6, width=12, verbose=False)  # save new file to directory
+    return png
+
+
+def get_concat_v_resize(im1, im2, resample=Image.BICUBIC, resize_big_image=True):
+    if im1.width == im2.width:
+        _im1 = im1
+        _im2 = im2
+    elif (((im1.width > im2.width) and resize_big_image) or
+          ((im1.width < im2.width) and not resize_big_image)):
+        _im1 = im1.resize((im2.width, int(im1.height * im2.width / im1.width)), resample=resample)
+        _im2 = im2
+    else:
+        _im1 = im1
+        _im2 = im2.resize((im1.width, int(im2.height * im1.width / im2.width)), resample=resample)
+    dst = Image.new('RGB', (_im1.width, _im1.height + _im2.height))
+    dst.paste(_im1, (0, 0))
+    dst.paste(_im2, (0, _im1.height))
+    return dst
+
+
+def get_concat_h_resize(im1, im2, resample=Image.BICUBIC, resize_big_image=True):
+    if im1.height == im2.height:
+        _im1 = im1
+        _im2 = im2
+    elif (((im1.height > im2.height) and resize_big_image) or
+          ((im1.height < im2.height) and not resize_big_image)):
+        _im1 = im1.resize((int(im1.width * im2.height / im1.height), im2.height), resample=resample)
+        _im2 = im2
+    else:
+        _im1 = im1
+        _im2 = im2.resize((int(im2.width * im1.height / im2.height), im1.height), resample=resample)
+    dst = Image.new('RGB', (_im1.width + _im2.width, _im1.height))
+    dst.paste(_im1, (0, 0))
+    dst.paste(_im2, (_im1.width, 0))
+    return dst
+
+
+def get_concat_v_blank(im1, im2, color=(255, 255, 255)):
+    """Concatenate two images vertically with a white margin"""
+    dst = Image.new('RGB', (max(im1.width, im2.width), im1.height + im2.height), color)
+    dst.paste(im1, (0, 0))
+    dst.paste(im2, (0, im1.height))
+    return dst
+
+
+def get_concat_h_blank(im1, im2, color=(255, 255, 255)):
+    """Concatenate two images horizontally with a white margin"""
+    dst = Image.new('RGB', (im1.width + im2.width, max(im1.height, im2.height)), color)
+    dst.paste(im1, (0, 0))
+    dst.paste(im2, (im1.width, 0))
+    return dst
+
+
+def oosplot_finalizer(im1, im2, im3, im4, savepath: str, dirname: str):
+    # jalogo = resource_path('jalogo.png')
+    # jalogo = Image.open(jalogo)
+    topplot = get_concat_h_resize(im1, im2, resize_big_image=False)  # concat two pngs horizontally
+    botplot = get_concat_h_resize(im3, im4, resize_big_image=False)  # concat two pngs horizontally
+    fpicname = savepath + os.sep + 'OOS Results - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot = get_concat_v_resize(topplot, botplot)  # concat both pngs vertically
+    # plot = get_concat_v_resize(plot, jalogo)  # concat both pngs vertically
+    plot.save(png, verbose=False)  # save new file to directory
+    # Image.open(png).show()  # open the final plot result
+    return png
+
+
+def fniplot_finalizer(im1, im2, savepath: str, dirname: str):
+    """Finalize the forecast accuracy and days of inventory pltos"""
+    plot = get_concat_v_blank(im1, im2)  # concat two pngs vertically
+    fpicname = savepath + os.sep + 'DOI and Forecast Results - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot.save(png, verbose=False)  # save new file to directory
+    return png
+
+
+def plotplot_finalizer(im1, im2, savepath: str, dirname: str):
+    """Finalize the forecast accuracy and days of inventory combined plot with the OOS combined plot"""
+    jalogo = resource_path('jalogo_long.png')
+    jalogo = Image.open(jalogo)
+    plot = get_concat_h_blank(im1, im2)  # concat two pngs horizontally
+    fpicname = savepath + os.sep + 'Scorecard Plots - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot = get_concat_v_resize(plot, jalogo)  # concat both pngs vertically
+    plot.save(png, verbose=False)  # save new file to directory
+    return png
+
+
+def plot2i_finalizer(im1, im2, savepath: str, dirname: str):
+    jalogo = resource_path('jalogo.png')
+    jalogo = Image.open(jalogo)
+    plot = get_concat_h_resize(im1, im2, resize_big_image=False)  # concat two pngs horizontally
+    fpicname = savepath + os.sep + 'OOS Incidents - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot = get_concat_v_resize(plot, jalogo)  # concat both pngs vertically
+    plot.save(png, verbose=False)  # save new file to directory
+    # Image.open(png).show()  # open the final plot result
+    return
+
+
+def plot2v_finalizer(im1, im2, savepath: str, dirname: str):
+    jalogo = resource_path('jalogo.png')
+    jalogo = Image.open(jalogo)
+    plot = get_concat_h_resize(im1, im2, resize_big_image=False)  # concat two pngs horizontally
+    fpicname = savepath + os.sep + 'OOS Volume - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot = get_concat_v_resize(plot, jalogo)  # concat both pngs vertically
+    plot.save(png, verbose=False)  # save new file to directory
+    # Image.open(png).show()  # open the final plot result
+    return
+
+
+def plot2seg_finalizer(im1, im2, savepath: str, dirname: str):
+    jalogo = resource_path('jalogo.png')
+    jalogo = Image.open(jalogo)
+    plot = get_concat_h_resize(im1, im2, resize_big_image=False)  # concat two pngs horizontally
+    fpicname = savepath + os.sep + 'OOS Volume by Segment - ' + dirname + '.png'  # name graph file of results
+    png = os.path.join(savepath, fpicname)  # join file name to directory path
+    png = os_split_fixer(png)  # correct operating system separators
+    plot = get_concat_v_resize(plot, jalogo)  # concat both pngs vertically
+    plot.save(png, verbose=False)  # save new file to directory
+    # Image.open(png).show()  # open the final plot result
+    return
+
+
+def pic_scaler(pic: str, scale: float):
+    """Resize image file preserving aspect ratio"""
+    png = Image.open(pic)               # open image
+    pic_wt = png.size[0] * scale        # calc max scaled width
+    pic_ht = png.size[1] * scale        # calc max scaled height
+    png.thumbnail((pic_wt, pic_ht))     # scale pic
+    png.save(pic, verbose=False)        # overwrite original with resized image
+    return png
+
+
+def disco_oos(oosfile: str) -> list:
+    """Get source data and create OOS results and graphs"""
+    # turn off chained assignment warning
+    pd.options.mode.chained_assignment = None  # default='warn'
+    # turn off user warnings for creating a dictionary of OSKUs with duplicate IDs
+    warnings.filterwarnings('ignore', category=UserWarning)
+    # read excel to dataframe
+    df = pd.read_excel(oosfile)
+    # rename columns
+    df = df.rename(columns={'Week Number': 'Week', 'Ship To Dist Nbr': 'ShipTo',
+                            'Ship To Dist DBA Name': 'Dist_Name',
+                            'Valid Distributor OSKU Pair Count': 'OOSc', 'ALL STR': 'STR'})
+    # reindex dataframe
+    df = df[['Year', 'Week', 'ShipTo', 'Dist_Name', 'OSKU', 'OOSi', 'OOSc', 'OOSv', 'STR']]
+    # filling all missing values in dataframe with 0
+    df = df.fillna(0)
+    # create new columns
+    df['Yr-Wk'] = df.agg('{0[Year]}-{0[Week]}'.format, axis=1)
+    df['OOSv_%'] = round(df['OOSv'] / df['STR'], 2)
+    # reindex dataframe
+    df = df[['Yr-Wk', 'ShipTo', 'Dist_Name', 'OSKU', 'OOSi', 'OOSc', 'OOSv', 'STR']]
+    df.style.format({'OOSi': '{:,}', 'OOSc': '{:,}', 'OOSv': '{:,.2f}', 'STR': '{:,.2f}'})
+    # sort dataframe by oos sales to retailers - largest to smallest
+    df = df.sort_values(by=['OOSv', 'OOSi'], ascending=[False, False])
+    # reset index without creating a new column
+    df.reset_index(drop=True, inplace=True)
+    # get total results by CSA for UPD pallets and units
+    rf1 = pd.DataFrame(df.groupby('Yr-Wk')['OOSv'].sum())
+    rf2 = pd.DataFrame(df.groupby('Yr-Wk')['STR'].sum())
+    rf3 = pd.DataFrame(df.groupby('Yr-Wk')['OOSi'].sum())
+    rf4 = pd.DataFrame(df.groupby('Yr-Wk')['OOSc'].sum())
+    # create a series with the index
+    rf1.reset_index(inplace=True)
+    rf2.reset_index(inplace=True)
+    rf3.reset_index(inplace=True)
+    rf4.reset_index(inplace=True)
+    # create list of dataframes
+    rflist = [rf1, rf2, rf3, rf4]
+    # reduce dataframes into combined frame
+    rf = reduce(lambda left, right: pd.merge(left, right, on='Yr-Wk'), rflist)
+    rf['OOSv_%'] = rf['OOSv'] / rf['STR']
+    rf['OOSi_%'] = rf['OOSi'] / rf['OOSc']
+    # reindex dataframe
+    rf = rf[['Yr-Wk', 'OOSv', 'STR', 'OOSv_%', 'OOSi', 'OOSc', 'OOSi_%']]
+    # format full results
+    df = df[df.OOSi == 1]  # only include OOS incidents
+    df.reset_index(drop=True, inplace=True)
+    df.reset_index(inplace=True)
+    df['Rank'] = df['index'] + 1
+    df['Total_OOSv_%'] = df['OOSv'] / df['OOSv'].sum()
+    df = df[['Rank', 'Yr-Wk', 'ShipTo', 'Dist_Name', 'OSKU', 'OOSv', 'STR', 'Total_OOSv_%']]
+    return [rf, df]
+
+
+def disco_doi(onifile: str):
+    """Get source data and create doi results and graphs"""
+    # turn off chained assignment warning
+    pd.options.mode.chained_assignment = None  # default='warn'
+    # turn off user warnings for creating a dictionary of OSKUs with duplicate IDs
+    warnings.filterwarnings('ignore', category=UserWarning)
+    # # read excel worksheets to dataframes
+    # invdf = pd.read_excel(onifile, sheet_name='Inventory')
+    # dfcdf = pd.read_excel(onifile, sheet_name='Forecast (Dist)')
+    # ledf = pd.read_excel(onifile, sheet_name='Forecast (LE)')
+    # strdf = pd.read_excel(onifile, sheet_name='Sales')
+    # inbdf = pd.read_excel(onifile, sheet_name='Inbounds')
+    # # filling all missing values in dataframes with 0
+    # invdf = invdf.fillna(0)
+    # dfcdf = dfcdf.fillna(0)
+    # ledf = ledf.fillna(0)
+    # strdf = strdf.fillna(0)
+    # inbdf = inbdf.fillna(0)
+    # # rename columns
+    # invdf = invdf.rename(columns={'Starting_Inv_Units': 'Inv'})
+    # dfcdf = dfcdf.rename(columns={'Dist_Fcst_Units': 'DFcst'})
+    # ledf = ledf.rename(columns={'MC_Fcst_Units': 'LE'})
+    # # summarize dataframes
+    # rf1 = pd.DataFrame(invdf.groupby('Week')['Inv'].sum())
+    # rf2 = pd.DataFrame(dfcdf.groupby('Week')['DFcst'].sum())
+    # rf3 = pd.DataFrame(ledf.groupby('Week')['LE'].sum())
+    # rf4 = pd.DataFrame(strdf.groupby('Week')['Act_STRs'].sum())
+    # rf5 = pd.DataFrame(inbdf.groupby('Week')['Inbound_Units'].sum())
+    # avg_daily_str = rf4['Act_STRs'].mean() / 7
+    # read excel worksheets to dataframes
+    df = pd.read_excel(onifile, sheet_name='DOI')
+    return df
+
+
+def disco_fa(fafile: str):
+    """Get source data and create doi results and graphs"""
+    # turn off chained assignment warning
+    pd.options.mode.chained_assignment = None  # default='warn'
+    # turn off user warnings for creating a dictionary of OSKUs with duplicate IDs
+    warnings.filterwarnings('ignore', category=UserWarning)
+    # read excel worksheets to dataframes
+    df = pd.read_excel(fafile, sheet_name='Forecast Accuracy')
+    return df
+
+
+def scorecard_maker(oosfile: str, onifile: str, fafile: str, dirname: int, shipto: str):
+    """Use source ShipTo reporting to create a combined distributor scorecard"""
+    # format directory name with leading WK
+    dirname = 'WK' + str(dirname)
+    # create folder name
+    foldername = str(dirname) + ' - ' + str(shipto)
+    # prepare OOS results
+    oos_results = disco_oos(oosfile)
+    oosrf = oos_results[0]    # OOS results df
+    oosdf = oos_results[1]    # OOS details df
+    # prepare DOI results
+    doidf = disco_doi(onifile)
+    # prepare forecast accuracy results
+    fcadf = disco_fa(fafile)
+    # file destination select dialogue
+    Tk().withdraw()  # prevent root window
+    dirspath = filedialog.askdirectory(title='Select the output file save destination')
+    dirsavepath = os_split_fixer(dirspath + os.sep + foldername)
+    os.mkdir(dirsavepath)
+    savepath = dirsavepath + os.sep
+    # create file name as a variable
+    scorecard = savepath + 'Scorecard - ' + foldername + '.xlsx'
+    # rewrite filepath with correct operating system separators
+    scorecard = os_split_fixer(scorecard)
+    # create a Pandas Excel writer using XlsxWriter as the engine
+    writer = pd.ExcelWriter(scorecard, engine='xlsxwriter')
+    # create workbook and worksheet objects
+    scorebook = writer.book
+    distdash = scorebook.add_worksheet('Scorecard')
+    # write each DataFrame to a specific sheet and reset the index
+    oosdf.to_excel(writer, sheet_name='OOS Detail', index=False)
+    doidf.to_excel(writer, sheet_name='DOI Detail', index=False)
+    fcadf.to_excel(writer, sheet_name='FCA Detail', index=False)
+    oosdeets = writer.sheets['OOS Detail']
+    doideets = writer.sheets['DOI Detail']
+    fcadeets = writer.sheets['FCA Detail']
+    # create formatting methods for workbook
+    comma_format = scorebook.add_format({'num_format': '#,##0.00', 'align': 'right'})
+    nodec_format = scorebook.add_format({'num_format': '#,##0', 'align': 'right'})
+    center_format = scorebook.add_format({'align': 'center'})
+    left_format = scorebook.add_format({'align': 'left'})
+    prcnt_format = scorebook.add_format({'num_format': '0.00%', 'align': 'right'})
+    # Set the column width and format - OOS tab
+    oosdeets.set_column('A:C', 10, center_format)
+    oosdeets.set_column('D:D', 45, left_format)
+    oosdeets.set_column('E:E', 10, center_format)
+    oosdeets.set_column('F:G', 10, comma_format)
+    oosdeets.set_column('H:H', 14, prcnt_format)
+    # format workbook
+    distdash.hide_gridlines(2)  # hide worksheet gridlines
+
+    # finalize OOS results
+
+    # calculate average results for each OOS category
+    avgip = oosrf['OOSi_%'].mean()
+    avgic = oosrf['OOSi'].mean()
+    avgvp = oosrf['OOSv_%'].mean()
+    avgvc = oosrf['OOSv'].mean()
+    # create graphs of CSA OOS results
+    oosip = oosip_barplot(oosrf, savepath, avgip)
+    oosic = oosic_barplot(oosrf, savepath, avgic)
+    oosvp = oosvp_barplot(oosrf, savepath, avgvp)
+    oosvc = oosvc_barplot(oosrf, savepath, avgvc)
+    # open new pngs as image objects
+    pic_oosip = Image.open(oosip)
+    pic_oosic = Image.open(oosic)
+    pic_oosvp = Image.open(oosvp)
+    pic_oosvc = Image.open(oosvc)
+    # concat images into dashboard
+    plot2i_finalizer(pic_oosip, pic_oosic, savepath, dirname)
+    plot2v_finalizer(pic_oosvp, pic_oosvc, savepath, dirname)
+    oosfinal = oosplot_finalizer(pic_oosip, pic_oosic, pic_oosvp, pic_oosvc, savepath, dirname)
+
+    # finalize DOI results
+
+    # get average DOI across all weeks
+    avg_doi = doidf['DOI'].mean()
+    # create plot of DOI results
+    doiplot = doip_barplot(doidf, savepath, avg_doi)
+
+    # finalize fa results
+
+    # get average forecast accuracy across all weeks
+    avg_fa = fcadf['Fcst_Acc'].mean()
+    # create plot of fa results
+    faplot = fap_barplot(fcadf, savepath, avg_fa)
+
+    # resize final graphs preserving aspect ratio
+    pic_scaler(oosfinal, .7)
+    pic_scaler(doiplot, .7)
+    pic_scaler(faplot, .7)
+
+    # combine DOI and fca plots
+    pic_doi = Image.open(doiplot)
+    pic_fca = Image.open(faplot)
+    fnifinal = fniplot_finalizer(pic_doi, pic_fca, savepath, dirname)
+
+    # combine both final plots into one dashboard
+    pic_oosfinal = Image.open(oosfinal)
+    pic_fnifinal = Image.open(fnifinal)
+    scoreboard = plotplot_finalizer(pic_oosfinal, pic_fnifinal, savepath, dirname)
+
+    # insert graphs to scorecard sheet
+    distdash.insert_image('A1', scoreboard)
+
+    # close the Pandas Excel writer and output the Excel file
+    writer.save()
+    # remove extra created plot pictures
+    os.remove(oosip)
+    os.remove(oosic)
+    os.remove(oosvp)
+    os.remove(oosvc)
+    return
+
+
+# time start
+begin_time = datetime.datetime.now()
+
+oos = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\DSOOS.xlsx'
+oni = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\DOI Sample Table.xlsx'
+fca = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\FA Sample.xlsx'
+scorecard_maker(oos, oni, fca, 19, '10140')
+
+# end time
+print(datetime.datetime.now() - begin_time)
