@@ -722,7 +722,7 @@ def import_gatp(gatpfile: str, mit: str) -> [dict, dict]:
     df = df[(df['Desc'] == 'Cumul. ATP Qty') | (df['Desc'] == 'Proj. Inventory') | (df['Desc'] == 'Avail. Qty.(C)')]
     # create list for ATP_IDs to delete
     pos_atp_ids = []
-    # create list of ATP_IDs with positive ATP to keep in dataframe
+    # create list of ATP_IDs with zero or positive ATP to keep in dataframe
     for index, row in df.iterrows():
         if row['ATP'] < 0 and row['Desc'] == 'Cumul. ATP Qty':
             pos_atp_ids.append(row['ATP_ID'])
