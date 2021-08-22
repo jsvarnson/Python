@@ -1,0 +1,206 @@
+# import packages
+import ctypes
+import datetime
+import os
+from datetime import date
+from pathlib import Path
+from tkinter import *
+from tkinter.filedialog import askopenfilename
+import gantt
+import pandas as pd
+
+
+def get_timestamps() -> list:
+    """Gets series of timestamps as well as week number and full date"""
+    # get timestamps
+    now = datetime.datetime.now()
+    week = datetime.datetime.today().isocalendar()[1]
+    hour = now.hour
+    tdate = now.today().strftime('%m-%d-%Y')  # mm-dd-yyyy
+    # convert hour to AM or PM
+    if hour == 0:
+        hour = '12AM'
+    elif hour == 12:
+        hour = '12PM'
+    elif hour >= 13:
+        # subtract 12 hours to convert from 24H to 12H
+        hour -= 12
+        hour = str(hour) + 'PM'
+    else:
+        hour = str(hour) + 'AM'
+    return [now.year, now.month, week, now.day, hour, now.minute, now.second, tdate]
+
+
+def os_split_fixer(string):
+    """Separate and rejoin selected file path with correct operating system separator"""
+    delimiters = '/', '\\'
+    maxsplit = 0
+    regexPattern = '|'.join(map(re.escape, delimiters))
+    splits = re.split(regexPattern, string, maxsplit)
+    splitlist = []
+    for split in splits:
+        splitlist.append(split + os.sep)
+
+    path = ''.join(splitlist)
+    splitpath = path[:-1]
+    return splitpath
+
+
+def uniq_file_maker(file: str) -> str:
+    """Create a unique file path"""
+    # get file name and extension
+    filename, filext = os.path.splitext(os.path.basename(file))
+    # get file directory path
+    directory = os.path.dirname(file)
+    # get file without extension only
+    filexx = os_split_fixer(directory + os.sep + filename)
+    # check if file exists
+    if Path(file).exists():
+        # create incrementing variable
+        i = 1
+        # determine incremented filename
+        while os.path.exists(f"{filexx} ({str(i)}){filext}"):
+            # update the incrementing variable
+            i += 1
+        # update file name with incremented variable
+        filename = directory + os.sep + filename + ' (' + str(i) + ')' + filext
+        # correct file path os separators
+        filename = os_split_fixer(filename)
+    else:
+        # pass original name if already unique
+        filename = file
+    return filename
+
+
+def create_obj_list(r_ange: int, obj_name: str) -> list:
+    """Dynamically make a list of resources for gantt charts"""
+    # create list of integers equal to length of resource list
+    int_list = list(range(1, r_ange + 1))
+    # create list to store final strings
+    final_list = []
+    # create a resource name for each item in list and add to final list
+    for n in int_list:
+        final_list.append(obj_name + '_' + str(n))
+    return final_list
+
+
+def proj_res_creator(resources: list) -> dict:
+    """Create dictionary of project resources from list"""
+    # get length of resources list
+    ra_nge = len(resources)
+    # create a list of resource names
+    res_vars = create_obj_list(ra_nge, 'res')
+    # create dictionary to store resources
+    r_dict = dict(zip(res_vars, resources))
+    return r_dict
+
+
+def proj_mil_creator(milestones: list) -> dict:
+    """Create dictionary of project milestones from list"""
+    # get length of milestone list
+    ra_nge = len(milestones)
+    # create a list of milestone names
+    mil_vars = create_obj_list(ra_nge, 'mil')
+    # create dictionary to store milestones
+    m_dict = dict(zip(mil_vars, milestones))
+    return m_dict
+
+
+def gantt_creator(gantt_file: str, proj_name: str):    # , start_date: datetime, end_date: datetime
+    """Create Gantt chart from source excel file"""
+    # create unique file name based on input
+    gantt_name = uniq_file_maker(gantt_file)
+    # select the source file
+    Tk().withdraw()
+    projfile = askopenfilename(title='Select a Project Outline File',
+                               filetypes=[('Excel files', '.xlsx .xls .xlsm')])
+    # end function if no file is selected
+    if not projfile:
+        ctypes.windll.user32.MessageBoxW(0, 'No file selected.', 'Project Outline', 0)
+        return
+    # read excel to dataframe
+    df = pd.read_excel(projfile, sheet_name='Tasks')
+    # redefine dataframe
+    df = df[['Task', 'Task_Name', 'Start_Date', 'Duration_Days', 'Resource', 'Color']]
+    # format column as datetime
+    df['Start_Date'] = pd.to_datetime(df.Start_Date)
+    # format column as mm/dd/yyyy
+    df['Start_Date'] = df['Start_Date'].dt.strftime('%m/%d/%Y')
+    # create new series splitting date into year, month, and day
+    df['Year'] = pd.DatetimeIndex(df['Start_Date']).year
+    df['Month'] = pd.DatetimeIndex(df['Start_Date']).month
+    df['Day'] = pd.DatetimeIndex(df['Start_Date']).day
+    # redefine dataframe
+    df = df[['Task', 'Task_Name', 'Year', 'Month', 'Day', 'Duration_Days', 'Resource', 'Color']]
+    # sort dataframe by start dates - earliest to latest
+    df = df.sort_values(by=['Year', 'Month', 'Day'], ascending=[True, True, True])
+    # convert dataframe to dictionary
+    tasks_dict = df.set_index('Task').T.to_dict('list')
+    # create list from series
+    res_data_list = df['Resource'].tolist()
+    # create dictionary of resource objects and their respective names
+    res_dict = proj_res_creator(res_data_list)
+    # create list to store resource objects
+    res_objs = []
+    # loop through each key in dictionary and create a resource object
+    for r in res_dict:
+        r = gantt.Resource(str(res_dict.get(r)))
+        # add resource object to list
+        res_objs.append(r)
+    # create iterable variable
+    n = 0
+    # create list to store task objects
+    task_objs = []
+    # create a list to store task strings
+    task_strs = []
+    # loop through each key in dictionary and create task object
+    for t, task in tasks_dict.items():
+        # add task to list as a string for later referencing
+        task_strs.append(str(t))
+        # create task object
+        t = gantt.Task(name=task[0], start=date(task[1], task[2], task[3]), duration=task[4], resources=[res_objs[n]], color=task[6])
+        # add task object to list
+        task_objs.append(t)
+        # progress iterable variable
+        n += 1
+    # create a dictionary of task objects and task object strings
+    tos_dict = dict(zip(task_objs, task_strs))
+    # read excel to dataframe
+    mf = pd.read_excel(projfile, sheet_name='Milestones')
+    # redefine dataframe
+    mf = mf[['Milestone', 'Last_Dependent_Task']]
+    # get lists of both series in dataframe
+    m_list = mf.Milestone.tolist()
+    d_list = mf.Last_Dependent_Task.tolist()
+    # create dict of milestone
+    mil_dict = proj_mil_creator(m_list)
+    # create list to store milestone objects
+    mil_objs = []
+    # create iterable variable
+    n = 0
+    # loop through each key in dictionary and create a resource object
+    for m in mil_dict:
+        # create milestone object
+        m = gantt.Milestone(name=str(mil_dict.get(m)), depends_of=[list(tos_dict.keys())[list(tos_dict.values()).index(str(d_list[n]))]])
+        # add resource object to list
+        mil_objs.append(m)
+        # progress iterable variable
+        n += 1
+    # create a project
+    project = gantt.Project(name=proj_name)
+    # add tasks to project
+    for task in task_objs:
+        project.add_task(task)
+    # add milestones to that project
+    for mil in mil_objs:
+        project.add_task(mil)
+    # get list of timestamps
+    times = get_timestamps()
+    # visualize project
+    project.make_svg_for_tasks(
+                          filename=gantt_name,
+                          today=date(times[0], times[1], times[3]),  # get current year, month, and day
+                          start=date(2021, 6, 22),   # change to variable entered on gui
+                          end=date(2021, 10, 1)   # change to variable entered on gui
+                         )
+    return
