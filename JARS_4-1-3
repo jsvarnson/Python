@@ -5547,14 +5547,19 @@ def order_week_reframe(or_df: pd.DataFrame) -> pd.DataFrame:
     so1_df.columns = ['PSS_Key', 'SO 1 Backup']
     so2_df.columns = ['PSS_Key', 'SO 2 Backup']
     # merge so dataframes with or_df dataframe on the PSS_Key
-    # or_df = or_df.merge(so1_df, on='PSS_Key', how='left')
-    # or_df = or_df.merge(so2_df, on='PSS_Key', how='left')
-    # reduce dataframes into combined dataframe
-    or_df = reduce(lambda left, right: pd.merge(left, right, on='PSS_Key', how='left'), [or_df, so1_df, so2_df])
+    or_df = or_df.merge(so1_df, on='PSS_Key', how='left')
+    # drop duplicate rows in or_df dataframe
+    or_df.drop_duplicates(subset='Key', inplace=True)
+    # merge so dataframes with or_df dataframe on the PSS_Key
+    or_df = or_df.merge(so2_df, on='PSS_Key', how='left')
+    # drop duplicate rows in or_df dataframe
+    or_df.drop_duplicates(subset='Key', inplace=True)
+    # fill missing values with 0
+    or_df = or_df.fillna(0)
     # replace missing sales orders with backup sales orders
     or_df['SO 1'] = np.where((or_df['SO 1'] == 0) & (or_df['SO 1 Backup'] != 0), or_df['SO 1 Backup'], or_df['SO 1'])
     or_df['SO 2'] = np.where((or_df['SO 2'] == 0) & (or_df['SO 2 Backup'] != 0), or_df['SO 2 Backup'], or_df['SO 2'])
-    # reindex or_df dataframe
+    # # reindex or_df dataframe
     or_df = or_df[['Key', 'Plant', 'ShipTo', 'OSKU', 'Segment',
                    'ShipTo_Name', 'State', 'Mode', 'Brand',
                    'Description', 'SO 1', 'SO 2',
