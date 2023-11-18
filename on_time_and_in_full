@@ -1,0 +1,637 @@
+import pandas as pd
+import numpy as np
+import datetime
+import os
+from tabulate import tabulate
+
+
+def union_dataframes(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+    """
+    Union two dataframes with matching columns.
+
+    Parameters:
+    df1 (pd.DataFrame): First dataframe to union.
+    df2 (pd.DataFrame): Second dataframe to union.
+
+    Returns:
+    pd.DataFrame: A new dataframe containing all rows from both input dataframes.
+
+    Raises:
+    ValueError: If the two dataframes do not have exactly the same columns.
+    """
+    # Check if both dataframes have the same columns
+    if not df1.columns.equals(df2.columns):
+        raise ValueError("Dataframes do not have the same columns")
+
+    # Concatenate the dataframes
+    unioned_df = pd.concat([df1, df2], ignore_index=True)
+
+    return unioned_df
+
+
+def concatenate_and_export(folder_path: str, output_file_name: str, export_format='excel') -> pd.DataFrame:
+    """
+    Reads all files with specified extensions in the given folder,
+    concatenates them into a single DataFrame, and exports to a specified file format.
+
+    Arguments:
+        folder_path: Path to the folder containing the files.
+        output_file_name: Name of the output file without extension.
+        export_format: Format to export the combined data ('excel', 'csv', 'pickle', 'feather').
+
+    Returns:
+        combined_df: DataFrame containing the concatenated data.
+    """
+    all_data = []
+    for file in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file)
+        file_extension = file.split('.')[-1].lower()
+
+        # Read the file based on its extension
+        if file_extension == 'csv':
+            df = pd.read_csv(file_path)
+        elif file_extension == 'xlsx':
+            df = pd.read_excel(file_path)
+        elif file_extension == 'feather':
+            df = pd.read_feather(file_path)
+        else:
+            print(f"Skipping unsupported file format: {file_extension}")
+            continue
+
+        all_data.append(df)
+
+    combined_df = pd.concat(all_data, ignore_index=True)
+
+    # Save the combined dataframe in the specified format
+    output_path = os.path.join(folder_path, f'{output_file_name}.{export_format}')
+
+    if export_format == 'csv':
+        combined_df.to_csv(output_path, index=False)
+    elif export_format == 'excel':
+        combined_df.to_excel(output_path, index=False)
+    elif export_format == 'pickle':
+        combined_df.to_pickle(output_path)
+    elif export_format == 'feather':
+        combined_df.to_feather(output_path)
+    else:
+        raise ValueError("Unsupported export format. Choose from 'csv', 'excel', 'pickle', 'feather'.")
+
+    return combined_df
+
+
+def parse_ruleset(ruleset: str) -> pd.DataFrame:
+    """
+    This function takes in the sourcing ruleset master data and calculates the number of weeks
+    Molson Coors expects transit of product to take between a source and destination. Duration
+    is an integer shown in hours. End result is a source to destination primary key with an
+    associated transit week offset. This should be interpreted as the number of acceptable
+    weeks it takes to deliver products on that lane.
+    """
+
+    # Determine the file type of the input file
+    file_extension = ruleset.split('.')[-1].lower()
+
+    # Read the data from the input file based on its file type
+    if file_extension == 'csv':
+        df = pd.read_csv(ruleset)
+    elif file_extension == 'xlsx':
+        df = pd.read_excel(ruleset)
+    elif file_extension == 'feather':
+        df = pd.read_feather(ruleset)
+    else:
+        raise ValueError("Unsupported file format: " + file_extension)
+
+    # reindex dataframe
+    df = df[['Destination Number', 'Source Number', 'Orderable SKU',
+             'Manufacturing SKU', 'Duration', 'Start Date',
+             ]]
+
+    # Rename columns in dataframe
+    df.rename(columns={
+        'Destination Number': 'destination',
+        'Source Number': 'source',
+        'Orderable SKU': 'OSKU',
+        'Manufacturing SKU': 'MSKU',
+        'Duration': 'duration_hours',
+    }, inplace=True)
+
+    # Sort dataframe by 'Start Date' latest to earliest
+    df.sort_values(by='Start Date', ascending=False, inplace=True)
+
+    # Create 'lane' column for merging
+    df['lane'] = df['source'].astype(str) + '_|_' + df['destination'].astype(str)
+
+    # Drop duplicate rows in 'lane' column after sorting
+    df.drop_duplicates(subset=['lane'], inplace=True)
+
+    # Convert 'duration_hours' to numeric, coerce errors and downcast
+    df['duration_hours'] = pd.to_numeric(df['duration_hours'], errors='coerce').fillna(0).astype(np.uint32)
+
+    # Calculate transportation lane week offset based on duration. Convert hours to days, rounding up, then
+    # add three days to account for business process logic, then convert days to weeks, rounding down. Any
+    # transit lanes durations that are missing or result in a zero week offset should be replaced with 1.
+    df['transit_offset_weeks'] = np.floor((np.ceil(df['duration_hours'] / 24) + 3) / 7)
+
+    # Update missing or 0 offsets with 1 week based on business rules
+    df['transit_offset_weeks'] = df['transit_offset_weeks'].replace(0, 1)
+
+    # Reindex dataframe to contain only 'lane' and 'transit_offset_weeks'
+    df = df[['lane', 'transit_offset_weeks']]
+
+    return df
+
+
+def parse_so_us_data(so_data: str, lanes_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate expected (planned) product delivery time for all USA Sales Orders
+    Line Items (primary key) by adding the transit time (in weeks) to the
+    week of the Material Availability Date.
+
+    Arguments:
+        so_data (str): File path to source data for Sales Order info.
+        lanes_df (pd.DataFrame): Preprocessed transit lane duration data from
+                                 the parse_ruleset function.
+    """
+
+    # Determine the file type of the input file
+    file_extension = so_data.split('.')[-1].lower()
+
+    # Read the data from the input file based on its file type
+    if file_extension == 'csv':
+        selected_headers = [
+            "Sales Order - Line Item", "Material Availability Yr-Wk",
+            'Source - Destination', "ShipTo", "ShipTo Country",
+            "Brand Name", "Container Segment", "OSKU", "OSKU Description",
+            "Initial Confirmed Volume (BBLs)",
+        ]
+        df = pd.read_csv(so_data, usecols=selected_headers)
+    elif file_extension == 'xlsx':
+        df = pd.read_excel(so_data)
+    elif file_extension == 'feather':
+        df = pd.read_feather(so_data)
+    else:
+        raise ValueError("Unsupported file format: " + file_extension)
+
+    df = df.rename(columns={
+        'Sales Order - Line Item': 'so_line_key',
+        'Material Availability Yr-Wk': 'pln_ship_strt_date_yr_wk',
+        'Source - Destination': 'lane',
+        "ShipTo": 'shipto',
+        "ShipTo Country": 'country',
+        "Brand Name": 'brand',
+        "Container Segment": 'cont_seg',
+        "OSKU": 'osku',
+        "OSKU Description": 'osku_desc',
+        'Initial Confirmed Volume (BBLs)': 'comtd_bbls',
+    })
+
+    # drop rows where so_line is null
+    df = df[df['so_line_key'].notnull()]
+
+    # merge lanes_df with so_data
+    df = df.merge(lanes_df, on='lane', how='left')
+
+    # fill missing values with 0 in duration column
+    df['transit_offset_weeks'].fillna(1, inplace=True)
+
+    # Convert year-week to datetime with a Sunday date assuming year-week is
+    # in the format 'YYYY-WW' and that the week starts on Monday
+    df['pln_ship_strt_date'] = pd.to_datetime(df['yr_wk'] + '0', format='%Y-%W%w') + pd.Timedelta(days=6)
+
+    # Add the offset days (offset weeks multiplied by 7)
+    df['so_pln_ship_end_date'] = df['pln_ship_strt_date'] + pd.to_timedelta(df['transit_offset_weeks'] * 7, unit='d')
+
+    # Convert the planned arrival date back to a year-week format
+    df['so_pln_ship_end_date_yr_wk'] = df['so_pln_ship_end_date'].dt.strftime('%Y-%W')
+
+    # reorganize columns
+    df = df[['so_line_key', 'country', 'shipto', 'country',
+             'brand', 'cont_seg', 'osku', 'osku_desc',
+             'pln_ship_strt_date', 'pln_ship_strt_date_yr_wk',
+             'so_pln_ship_end_date', 'so_pln_ship_end_date_yr_wk', 'comtd_bbls',
+             ]]
+
+    return df
+
+
+def parse_so_ca_data(so_data: str) -> pd.DataFrame:
+    """
+    Calculate expected (planned) product delivery time for all Canada Sales
+    Orders Line Items (primary key) by adding the transit time (in weeks) to
+    the week of the Material Availability Date.
+
+    Arguments:
+        so_data (str): File path to source data for Sales Order info.
+    """
+
+    # Determine the file type of the input file
+    file_extension = so_data.split('.')[-1].lower()
+
+    # Read the data from the input file based on its file type
+    if file_extension == 'csv':
+        selected_headers = [
+            "Sales Order - Line Item", "Material Availability Yr-Wk",
+            "Material Availability Date", "ShipTo", "ShipTo Country",
+            "Brand Name", "Container Segment", "OSKU", "OSKU Description",
+            "Order Quantity (BBLs)",
+        ]
+        df = pd.read_csv(so_data, usecols=selected_headers)
+    elif file_extension == 'xlsx':
+        df = pd.read_excel(so_data)
+    elif file_extension == 'feather':
+        df = pd.read_feather(so_data)
+    else:
+        raise ValueError("Unsupported file format: " + file_extension)
+
+    df = df.rename(columns={
+        'Sales Order - Line Item': 'so_line_key',
+        'Material Availability Yr-Wk': 'pln_ship_strt_date_yr_wk',
+        'Material Availability Date': 'pln_ship_strt_date',
+        "ShipTo": 'shipto',
+        "ShipTo Country": 'country',
+        "Brand Name": 'brand',
+        "Container Segment": 'cont_seg',
+        "OSKU": 'osku',
+        "OSKU Description": 'osku_desc',
+        "Order Quantity (BBLs)": 'comtd_bbls',
+    })
+
+    # drop rows where so_line is null
+    df = df[df['so_line_key'].notnull()]
+
+    # create new column to match usa sales order data
+    df['so_pln_ship_end_date'] = df['pln_ship_strt_date']
+
+    # Convert the planned arrival date back to a year-week format
+    df['so_pln_ship_end_date_yr_wk'] = df['so_pln_ship_end_date'].dt.strftime('%Y-%W')
+
+    # Update country values from Canada to CA
+    df['country'] = df['country'].replace('Canada', 'CA', case=False)
+
+    # reorganize columns
+    df = df[['so_line_key', 'country', 'shipto', 'country',
+             'brand', 'cont_seg', 'osku', 'osku_desc',
+             'pln_ship_strt_date', 'pln_ship_strt_date_yr_wk',
+             'so_pln_ship_end_date', 'so_pln_ship_end_date_yr_wk', 'comtd_bbls',
+             ]]
+
+    return df
+
+
+def parse_ship_data(ship_data: str) -> pd.DataFrame:
+    # Determine the file type of the input file
+    file_extension = ship_data.split('.')[-1].lower()
+
+    # Read the data from the input file based on its file type
+    if file_extension == 'csv':
+        selected_headers = [
+            "CV_CM_DALEN_DATE", "CV_CM_DATEN_DATE", "CV_CM_DPTEN_DATE",
+            "Origin_PLANT", "ZZDESTINATION", "_BIC_ZCOSKUNUM",
+            "CV_CA_Delivery_Num", "CV_CA_Shipment_num", "CV_CM_Sales_Order_No",
+            "CV_CM_Sales_Order_Line_No", "SUM(CV_BBL_Converted_Qty)",
+        ]
+        ship_df = pd.read_csv(ship_data, usecols=selected_headers)
+    elif file_extension == 'xlsx':
+        ship_df = pd.read_excel(ship_data)
+    elif file_extension == 'feather':
+        ship_df = pd.read_feather(ship_data)
+    else:
+        raise ValueError("Unsupported file format: " + file_extension)
+
+    ship_df.rename(columns={
+        'CV_CM_DALEN_DATE': 'act_load_end_date',
+        'CV_CM_DATEN_DATE': 'act_ship_end_date',
+        'CV_CM_DPTEN_DATE': 'pln_ship_end_date',
+        'Origin_PLANT': 'origin',
+        'ZZDESTINATION': 'destination',
+        '_BIC_ZCOSKUNUM': 'osku',
+        'CV_CA_Delivery_Num': 'deliv_num',
+        'CV_CA_Shipment_num': 'shipm_num',
+        'CV_CM_Sales_Order_No': 'so_num',
+        'CV_CM_Sales_Order_Line_No': 'soline_num',
+        'SUM(CV_BBL_Converted_Qty)': 'act_qty_delv_bbl',
+    }, inplace=True)
+
+    # round sales order line item multiple of 10
+    ship_df['orig_soline_num'] = ship_df['soline_num'] - (ship_df['soline_num'] % 10)
+
+    # Remove rows where 'so_num' is NaN
+    ship_df = ship_df.dropna(subset=['so_num'])
+
+    # Assuming 'Sales Order Number' + '_' + 'Sales Order Line Item' forms a unique line item key
+    # Convert float to int to remove the decimal, then to str for concatenation
+    ship_df['so_line_key'] = ship_df['so_num'].astype(int).astype(str) + '_|_' + \
+                             ship_df['orig_soline_num'].astype(int).astype(str)
+
+    ship_df['lane'] = ship_df['origin'].astype(int).astype(str) + '_|_' + \
+                             ship_df['destination'].astype(int).astype(str)
+
+    # list date columns for processing
+    date_columns = ['act_load_end_date', 'act_ship_end_date', 'pln_ship_end_date']
+
+    # format columns as dates
+    for column in date_columns:
+        ship_df[column] = pd.to_datetime(ship_df[column]).dt.date
+
+    # create yr-wk columns from dates
+    for column in date_columns:
+        # Convert the column to datetime
+        ship_df[column] = pd.to_datetime(ship_df[column])
+
+        # Create a new column with year-week-day format
+        # where '%W' is the week number and '1' is Monday
+        ship_df[f'{column}_yr_wk'] = ship_df[column].dt.strftime('%Y-%W')
+
+    # reorganize columns
+    ship_df = ship_df[['so_line_key', 'so_num', 'soline_num', 'osku', 'deliv_num', 'shipm_num', 'lane',
+                       'act_load_end_date', 'act_ship_end_date', 'pln_ship_end_date',
+                       'act_load_end_date_yr_wk', 'act_ship_end_date_yr_wk', 'pln_ship_end_date_yr_wk',
+                       'act_qty_delv_bbl']]
+
+    return ship_df.reset_index()
+
+
+def so_ship_mesh(so_df: pd.DataFrame, ship_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Connect Sales Order data to Shipment data by matching on Sales Order Line Item unique key.
+    
+    Arguments:
+        ship_df (pd.DataFrame): Preprocessed Shipment data.
+        so_df (pd.DataFrame): Preprocessed Sales Orders with transit data from the
+                              parse_so_data function.
+    """
+    # select sales order columns to keep for merge 
+    so_df = so_df[['so_line_key', 'country', 'shipto', 'country',
+                   'brand', 'cont_seg', 'osku', 'osku_desc',
+                   'pln_ship_strt_date', 'pln_ship_strt_date_yr_wk',
+                   'so_pln_ship_end_date', 'so_pln_ship_end_date_yr_wk', 'comtd_bbls',
+                   ]]
+
+    # select delivery and shipment columns to keep for merge
+    ship_df = ship_df[['so_line_key', 'so_num', 'soline_num', 'deliv_num', 'shipm_num', 'lane',
+                       'act_load_end_date', 'act_ship_end_date', 'pln_ship_end_date',
+                       'act_load_end_date_yr_wk', 'act_ship_end_date_yr_wk', 'pln_ship_end_date_yr_wk',
+                       'act_qty_delv_bbl']]
+    
+    # Join in sales order planned arrival week data to compare if each sales order line item
+    # delivered on or before the planned arrival week. Use Delivery Line Item as the primary key.
+    so_ship_df = pd.merge(ship_df, so_df, left_on='so_line_key', right_on='so_line_key', how='left')
+    
+    # Create conditions for country specific planned shipment ship end date logic
+    pln_ship_strt_date_cond = [so_ship_df['country'] == 'US', so_ship_df['country'] == 'CA']
+
+    # Create values for country specific planned shipment ship end date logic
+    pln_ship_strt_date_values = [so_ship_df['so_pln_ship_end_date'], so_ship_df['pln_ship_end_date']]
+
+    # Create new column to unify on-time delivery logic across countries
+    so_ship_df['planned_ship_end_date'] = np.select(pln_ship_strt_date_cond, pln_ship_strt_date_values, default=0)
+    
+    # Calculate year-week for planned shipment ship end date
+    so_ship_df['planned_ship_end_date_yr_wk'] = so_ship_df['planned_ship_end_date'].dt.strftime('%Y-%W')
+    
+    # Check if 'act_qty_delv_bbl' is of object type and contains strings in ship_df
+    if ship_df['act_qty_delv_bbl'].dtype == 'object':
+        ship_df['act_qty_delv_bbl'] = ship_df['act_qty_delv_bbl'].str.replace(',', '').astype(float)
+    else:
+        ship_df['act_qty_delv_bbl'] = ship_df['act_qty_delv_bbl'].astype(float)
+
+    # Do the same for 'comtd_bbls' in so_df
+    if so_df['comtd_bbls'].dtype == 'object':
+        so_df['comtd_bbls'] = so_df['comtd_bbls'].str.replace(',', '').astype(float)
+    else:
+        so_df['comtd_bbls'] = so_df['comtd_bbls'].astype(float)
+    
+    # Rename columns to match output
+    so_ship_df.rename(columns={
+        'planned_ship_end_date': 'pln_ship_end_date',
+        'planned_ship_end_date_yr_wk': 'pln_ship_end_date_yr_wk',
+    }, inplace=True)
+    
+    # select columns to keep in final dataframe
+    so_ship_df = so_ship_df[[
+        # document information
+        'so_line_key', 'country', 'shipto', 'country',
+        'so_num', 'soline_num', 'deliv_num', 'shipm_num', 'lane',
+        'brand', 'cont_seg', 'osku', 'osku_desc',
+        
+        # planned shipment start and end dates and weeks
+        'pln_ship_strt_date', 'pln_ship_strt_date_yr_wk',
+        'pln_ship_end_date', 'pln_ship_end_date_yr_wk',
+        
+        # actual shipment load and end dates and weeks
+        'act_load_end_date', 'act_load_end_date_yr_wk', 
+        'act_ship_end_date', 'act_ship_end_date_yr_wk', 
+        
+        # committed volume and delivered volume
+        'comtd_bbls', 'act_qty_delv_bbl',
+    ]]
+    
+    return so_ship_df.reset_index()
+    
+
+def calc_shipped_on_time_data(so_ship_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Trace time of delivery for a Shipment back to its associated Sales Order to review 
+    what was actually delivered on-time against the planned arrival week. Calculated
+    for that Sales Order Line Item (OSKU only, multiple of 10). Calculate ratio of
+    On-Time as a percent for each Sales Order and Line Item unique value.
+
+    Arguments:
+        so_ship_df (pd.DataFrame): Preprocessed join Sales Order and Shipment data.
+    """
+
+    # Calculate on-time delivery for each sales order line item by comparing the actual shipment end date
+    # against the planned arrival date determined dynamically by country specific logic.
+    so_ship_df['on_time_delv'] = so_ship_df['act_ship_end_date'] <= so_ship_df['pln_ship_end_date']
+
+    # Calculate on-time loading for each sales order line item by comparing the actual load end date
+    # against the planned shipment start date determined by the sales order materival availability date.
+    # In the US, the planned shipment start date is always the last day of the week. In Canada, the planned
+    # shipment start date is determined by the shipment.
+    so_ship_df['on_time_load'] = so_ship_df['act_load_end_date'] <= so_ship_df['pln_ship_strt_date']
+
+    # Calculate on-time percent on sales order line item by aggregating count of on-time
+    # delivered sales order line items (numerator) against the count of delivery line items
+    # (denominator) that sales order is associated with.
+    otif_summary = so_ship_df.groupby('so_line_key').agg(
+        on_time_deliv_count=('on_time_deliv', 'sum'),
+        total_deliv_count=('so_line_key', 'count')
+    )
+    otif_summary['On-Time Delivery %'] = (otif_summary['on_time_deliv_count'] /
+                                       otif_summary['total_deliv_count']) * 100
+
+    # Repeat for on-time loading to calculate order fulfillment %
+    oful_summary = so_ship_df.groupby('so_line_key').agg(
+        on_time_load_count=('on_time_deliv', 'sum'),
+        total_load_count=('so_line_key', 'count')
+    )
+    oful_summary['On-Time Loading %'] = (oful_summary['on_time_load_count'] /
+                                          oful_summary['total_load_count']) * 100
+
+    # Return the summary dataframes for the two metrics: on-time and in-full, and order fulfillment
+    return otif_summary.reset_index().fillna(0), oful_summary.reset_index().fillna(0)
+
+
+def calc_shipped_in_full_data(ship_df: pd.DataFrame, so_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Trace volume delivered on a Shipment back to its associated Sales Order to review
+    what amount of volume was actually delivered against the original confirmed value
+    for that Sales Order Line Item (OSKU only, multiple of 10). Calculate ratio of
+    In-Full as a percent for each Sales Order and Line Item unique value.
+
+    Arguments:
+        ship_df (pd.DataFrame): Preprocessed Shipment data.
+        so_df (pd.DataFrame): Preprocessed Sales Orders with transit data from the
+                              parse_so_data function.
+    """
+
+    # Remove rows with null or zero in 'orig_so_line' or 'delivered_vol'
+    ship_df.dropna(subset=['so_line_key', 'act_qty_delv_bbl'], inplace=True)
+    ship_df = ship_df[ship_df['act_qty_delv_bbl'] > 0]
+
+    # Sum the delivered volume by original sales order line item
+    ship_agg_df = ship_df.groupby('so_line_key', as_index=False)['act_qty_delv_bbl'].sum()
+
+    # Merge with sales order DataFrame
+    infull_df = pd.merge(so_df, ship_agg_df, left_on='so_line_key', right_on='so_line_key', how='left')
+
+    # Calculate the 'In-Full' percentage
+    infull_df['In-Full %'] = np.where(
+        infull_df['act_qty_delv_bbl'] > infull_df['comtd_bbls'],
+        1,
+        (infull_df['act_qty_delv_bbl'] / infull_df['comtd_bbls'])
+    )
+
+    # Cap the 'In-Full' percentage at 100
+    infull_df['In-Full %'] = np.clip(infull_df['In-Full %'], 0, 1)
+
+    return infull_df.reset_index().fillna(0)
+
+
+def calc_on_time_in_full(ontime_df: pd.DataFrame, infull_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Join on time and in full dataframes on sales order line items and then just multiple
+    across to get final OTIF %.
+    """
+
+    # Join the on-time and in-full dataframes on the sales order line item
+    otif_df = pd.merge(ontime_df, infull_df, left_on='so_line_key', right_on='so_line_key', how='inner')
+
+    # Multiply on-time loading percent and in-full percent to get OTIF percent
+    otif_df['OFUL %'] = otif_df['On-Time Loading %'] * otif_df['In-Full %']
+
+    # Multiply on-time delivery percent and in-full percent to get OTIF percent
+    otif_df['OTIF %'] = otif_df['On-Time Delivery %'] * otif_df['In-Full %']
+
+    # Select relevant columns
+    otif_df = otif_df[['so_line_key', 'country', 
+                       'pln_ship_strt_date_yr_wk', 'pln_ship_end_date_yr_wk',
+                       'On-Time Loading %', 'On-Time Delivery %', 'In-Full %', 'OTIF %']]
+
+    # Rename the columns to be more readable and formal for end users
+    otif_df = otif_df.rename(columns={
+        'so_line': 'Sales Order - OSKU Line Item',
+        'country': 'Country',
+        'pln_ship_strt_date_yr_wk': 'Material Availability Yr-Wk',
+        'pln_ship_end_date_yr_wk': 'Planned Arrival Yr-Wk',
+        'comtd_bbls': 'Committed Volume (BBLs)',
+    })
+
+    # Calculate weighted average OTIF % by planned arrival week weighting by committed volume
+    otif_results_df = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['OTIF %'], weights=x['Committed Volume (BBLs)'])
+    ).reset_index(name='WAvg OTIF %')
+
+    # Sum the committed volume by planned arrival week
+    otif_results_df['Committed Volume (BBLs)'] = otif_df.groupby('Planned Arrival Yr-Wk')['Committed Volume (BBLs)'].sum().values
+
+    # Calculate weighted average On-Time Delivery % by planned arrival week
+    otif_results_df['WAvg On-Time Delivery %'] = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['On-Time Delivery %'], weights=x['Committed Volume (BBLs)'])
+    ).values
+
+    # Calculate weighted average In-Full % by planned arrival week
+    otif_results_df['WAvg In-Full %'] = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['In-Full %'], weights=x['Committed Volume (BBLs)'])
+    ).values
+
+    # Calculate weighted average OFUL % by planned arrival week weighting by committed volume
+    oful_results_df = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['OFUL %'], weights=x['Committed Volume (BBLs)'])
+    ).reset_index(name='WAvg OFUL %')
+    
+    # Sum the committed volume by planned arrival week
+    oful_results_df['Committed Volume (BBLs)'] = otif_df.groupby('Planned Arrival Yr-Wk')['Committed Volume (BBLs)'].sum().values
+
+    # Calculate weighted average On-Time Loading % by planned arrival week
+    oful_results_df['WAvg On-Time Loading %'] = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['On-Time Loading %'], weights=x['Committed Volume (BBLs)'])
+    ).values
+
+    # Calculate weighted average In-Full % by planned arrival week
+    oful_results_df['WAvg In-Full %'] = otif_df.groupby('Planned Arrival Yr-Wk').apply(
+        lambda x: np.average(x['In-Full %'], weights=x['Committed Volume (BBLs)'])
+    ).values
+    
+    return otif_df, otif_results_df, oful_results_df
+
+
+def process_otif(ruleset: str, 
+                 us_sales_orders: str,
+                 ca_sales_orders: str, 
+                 shipments: str,
+                 save_destination: str) -> (pd.DataFrame, pd.DataFrame):
+    """
+    This function calculates On-Time and In-Full performance for Molson Coors start to finish.
+    """
+
+    # Time start
+    time_start = datetime.datetime.now()
+
+    # Format the date and time as yyyymmddhhmm
+    timestamp = time_start.strftime("%Y%m%d%H%M")
+
+    # Parse the ruleset
+    lanes_df = parse_ruleset(ruleset)
+
+    # Parse the sales order data by country
+    usso_df = parse_so_us_data(so_data=us_sales_orders, lanes_df=lanes_df)
+    caso_df = parse_so_ca_data(so_data=ca_sales_orders)
+
+    # union us and ca sales order dataframes
+    so_df = union_dataframes(df1=usso_df, df2=caso_df)
+
+    # Parse the shipment data
+    ship_df = parse_ship_data(shipments)
+
+    # Calculate on-time delivery and loading results
+    ontime_deliv_df, ontime_load_df = calc_shipped_on_time_data(ship_df, so_df)
+
+    # Calculate in-full delivery and loading results
+    infull_deliv_df, infull_load_df = calc_shipped_in_full_data(ship_df, so_df)
+
+    # Finish by calculating final on-time and in-full results
+    otif_df_detail, otif_df_results = calc_on_time_in_full(ontime_deliv_df, infull_deliv_df)
+
+    # Create a directory at the destination to save all the output files
+    os.makedirs(f"{save_destination} - {timestamp}", exist_ok=True)
+
+    # Save the output files
+    otif_df_detail.to_csv(os.path.join(save_destination, f"OTIF Detail - {timestamp}.csv"), index=False)
+
+    # Time end
+    print("OTIF Execution Time:", datetime.datetime.now() - time_start)
+
+    return otif_df_detail, otif_df_results
+
+
+if __name__ == '__main__':
+
+    # process on-time and in-full results
+    otif_detail, otif_results = process_otif(
+        ruleset='C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Development 20231118\\Current Ruleset 20231118.xlsx',
+        us_sales_orders='C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Development 20231118\\Sales Orders - US - 2023-01 to 2023-43.csv',
+        ca_sales_orders='C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Development 20231118\\Sales Orders - CA - 2023-01 to 2023-45.csv',
+        shipments='C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Development 20231118\\Shipments - US + CA - 2023-01 to 2023-45.csv',
+        save_destination='C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Development 20231118',
+    )
