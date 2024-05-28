@@ -1860,11 +1860,17 @@ class otif:
     def __init__(self,
                  lane_data: pd.DataFrame,
                  sales_order_data: pd.DataFrame,
-                 shipments_data: pd.DataFrame
+                 shipments_data: pd.DataFrame,
+                 plant_data: pd.DataFrame,
+                 material_data: pd.DataFrame,
+                 customer_data: pd.DataFrame,
                  ):
         self.so_data = sales_order_data
         self.lane_data = lane_data
         self.ship_data = shipments_data
+        self.plants = plant_data
+        self.materials = material_data
+        self.customers = customer_data
         self.lane_key = None
         self.on_time = None
         self.so_ship_data = None
@@ -1885,6 +1891,7 @@ class otif:
         self.otif_process_shipments()
         self.otif_process_on_time()
         self.otif_process_detail_results()
+        self.otif_enrich_detail_results()
 
         # Turn warnings back on
         warnings.filterwarnings(action='default', category=pd.errors.DtypeWarning)
@@ -2281,6 +2288,36 @@ class otif:
         # Clean up resulting dataframe
         self.otif_df.reset_index(drop=True).fillna(0)
 
+    def otif_enrich_detail_results(self):
+        """
+        Enrich the calculated OTIF results detail with plant data, product data, and customer data.
+        """
+        # Select columns for merging and format
+        self.plants = self.plants[[
+            'plant_|_werks',
+            'name_1_|_name1',
+            'GeoHash',
+            'plant_type',
+        ]]
+        self.otif_df['Origin'] = self.otif_df['Origin'].astype(int)
+        self.plants['plant_|_werks'] = self.plants['plant_|_werks'].astype(int)
+        self.materials['OSKU Number'] = self.materials['OSKU Number'].astype(int)
+
+        # Remove leading zeros
+        self.customers['Customer Number'] = self.customers['Customer Number'].astype(str).str.lstrip('0')
+
+        # Rename columns for merging below
+        self.plants.rename(columns={'plant_|_werks': 'Origin',
+                                    'name_1_|_name1': 'plant_name',
+                                    }, inplace=True)
+        self.materials.rename(columns={'OSKU Number': 'osku'}, inplace=True)
+        self.customers.rename(columns={'Customer Number': 'shipto'}, inplace=True)
+
+        # Enrich with plant, material, and customer data
+        self.otif_df = pd.merge(self.otif_df, self.plants, on='Origin', how='left')
+        self.otif_df = pd.merge(self.otif_df, self.materials, on='osku', how='left')
+        self.otif_df = pd.merge(self.otif_df, self.customers, on='shipto', how='left')
+
     def save_results(self,
                      save_destination: str,
                      file_name: str,
@@ -2493,17 +2530,31 @@ if __name__ == '__main__':
     #                    shipto_list=reyes_list)
 
     """
-    Real File Paths
+    Input File Paths
     """
-    lanedata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\Lane Data Sources\\Transportation Lane Distance and Duration.xlsx'
     us_sales_ordersdata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\OTIF - 2024-20\\USA Sales Orders - 2024-20.csv'
     shipmentsdata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\OTIF - 2024-20\\OTIF - Completed Shipments - S_2023-04-17 - U_2024-05-20.csv'
     filename = 'US - 2024-20-Test'
 
+    """
+    Enrichment File Paths
+    """
+    lanedata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\Lane Data Sources\\Transportation Lane Distance and Duration.xlsx'
+    plantdata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\Enrichments\\plant_enriched.csv'
+    materialdata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\Enrichments\\Material.csv'
+    customerdata = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\On-Time and In-Full Dev\\Published\\Enrichments\\Customer.csv'
+
     lanedata = pd.read_excel(lanedata)
+    plantdata = pd.read_csv(plantdata)
+    materialdata = pd.read_csv(materialdata)
+    customerdata = pd.read_csv(customerdata)
     us_sales_ordersdata = pd.read_csv(us_sales_ordersdata)
     shipmentsdata = pd.read_csv(shipmentsdata)
     save_directory = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF Results'
+
+    """
+    Calculate On-Time and In-Full Results
+    """
 
     # # process on-time and in-full results
     # process_otif(
@@ -2522,6 +2573,9 @@ if __name__ == '__main__':
         lane_data=lanedata,
         sales_order_data=us_sales_ordersdata,
         shipments_data=shipmentsdata,
+        plant_data=plantdata,
+        material_data=materialdata,
+        customer_data=customerdata,
     )
     otif.save_results(
         save_destination=save_directory,
@@ -2536,16 +2590,3 @@ if __name__ == '__main__':
     #     save_destination=save_directory,
     #     file_name=filename,
     # )
-
-    """
-    Create viewable detail files
-    """
-    # # so_detail = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF_2023\\OTIF Results - 202402010143\\OTIF Detail - 2022-47 - 2024-11 - 202402010143.csv'
-    # # so_output = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF_2023\\OTIF Results - 202402010143\\OTIF - Sales Order Detail - 2023-03 - 2024-03.xlsx'
-    # ship_detail = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF_2023\\OTIF Results - 202402010143\\Shipment Detail - 2022-47 - 2024-11 - 202402010143.csv'
-    # ship_output = 'C:\\Users\\JSVAR\\OneDrive\\Desktop\\OTIF_2023\\OTIF Results - 202402010143\\OTIF - Shipment Detail - 2023-03 - 2024-03.xlsx'
-    # unique_values_to_worksheets(csv_data=ship_detail,
-    #                             output_file=ship_output,
-    #                             column_name='pln_ship_end_date_yr_wk')
-
-
